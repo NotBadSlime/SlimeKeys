@@ -1,6 +1,13 @@
 export type InputSource = "all" | "file" | "live";
 export type MidiEventType = "noteOn" | "noteOff" | "both";
 export type TriggerMode = "tap" | "hold" | "retrigger" | "chop";
+export type HotkeyAction = "play" | "stop" | "next" | "previous" | "releaseAll";
+
+export interface HotkeyBinding {
+  action: HotkeyAction;
+  accelerator: string;
+  enabled: boolean;
+}
 
 export interface OctaveFold {
   enabled: boolean;
