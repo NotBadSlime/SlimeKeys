@@ -34,6 +34,23 @@ export function normalizeAccelerator(accelerator: string): string {
     .join("+");
 }
 
+export function acceleratorFromKeyboardEvent(event: KeyboardEvent): string {
+  const key = normalizeEventKey(event.key);
+  if (!key) {
+    return "";
+  }
+
+  const parts = [
+    event.ctrlKey ? "Ctrl" : "",
+    event.altKey ? "Alt" : "",
+    event.shiftKey ? "Shift" : "",
+    event.metaKey ? "Command" : "",
+    key,
+  ].filter(Boolean);
+
+  return normalizeAccelerator(parts.join("+"));
+}
+
 export function validateHotkeyBindings(
   bindings: (Pick<HotkeyBinding, "accelerator" | "enabled"> & {
     action?: unknown;
@@ -131,6 +148,24 @@ function normalizeAcceleratorPart(part: string): string {
   };
 
   return aliases[lower] ?? normalizeKeyName(part);
+}
+
+function normalizeEventKey(key: string): string {
+  const aliases: Record<string, string> = {
+    ArrowLeft: "Left",
+    ArrowRight: "Right",
+    ArrowUp: "Up",
+    ArrowDown: "Down",
+    " ": "Space",
+  };
+  const normalized = aliases[key] ?? key;
+  const lower = normalized.toLowerCase();
+
+  if (["control", "ctrl", "alt", "shift", "meta"].includes(lower)) {
+    return "";
+  }
+
+  return normalized;
 }
 
 function normalizeKeyName(part: string): string {

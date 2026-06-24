@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  acceleratorFromKeyboardEvent,
   DEFAULT_HOTKEYS,
   HOTKEY_ACTIONS,
   mergeSavedHotkeys,
@@ -63,5 +64,17 @@ describe("hotkey helpers", () => {
       accelerator: "",
       enabled: false,
     });
+  });
+
+  it("builds accelerators from keyboard events", () => {
+    const event = {
+      ctrlKey: true,
+      altKey: true,
+      shiftKey: false,
+      metaKey: false,
+      key: "ArrowRight",
+    } as KeyboardEvent;
+
+    expect(acceleratorFromKeyboardEvent(event)).toBe("Ctrl+Alt+Right");
   });
 });
