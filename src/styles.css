@@ -136,6 +136,25 @@ button:hover {
   padding: 12px 16px;
 }
 
+.status-line {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 18px;
+  border-bottom: 1px solid #dbe3dd;
+  background: #f8faf8;
+  padding: 0 16px;
+  color: #526158;
+  font-size: 13px;
+}
+
+.status-line span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .command {
   display: inline-flex;
   min-height: 34px;
@@ -223,7 +242,8 @@ button:hover {
 }
 
 .rule-table {
-  overflow: hidden;
+  max-height: calc(100vh - 190px);
+  overflow: auto;
   border: 1px solid #ced8d1;
   border-radius: 8px;
   background: #ffffff;
@@ -250,12 +270,37 @@ button:hover {
 }
 
 .rule-row.header {
+  position: sticky;
+  top: 0;
   min-height: 34px;
   background: #f2f5f2;
   color: #526158;
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.mode-badge {
+  display: inline-flex;
+  min-width: 72px;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #edf4f0;
+  color: #2f7f5f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mode-badge.hold {
+  background: #f5eeee;
+  color: #a44537;
+}
+
+.mode-badge.retrigger,
+.mode-badge.chop {
+  background: #eef1f7;
+  color: #3e5f97;
 }
 
 .inspector {
@@ -277,6 +322,10 @@ button:hover {
   align-items: center;
   gap: 10px;
   padding: 12px;
+}
+
+.release-command {
+  justify-content: center;
 }
 
 .output-toggle div {

@@ -54,3 +54,23 @@ export interface Preset {
   playback: PlaybackSettings;
   rules: Rule[];
 }
+
+export interface MidiInputDevice {
+  id: number;
+  name: string;
+}
+
+export interface MidiEvent {
+  inputSource: InputSource;
+  eventType: Exclude<MidiEventType, "both">;
+  track: number | null;
+  channel: number;
+  note: number;
+  velocity: number;
+  atMs: number;
+}
+
+export interface AppSnapshot {
+  presets: Preset[];
+  outputEnabled: boolean;
+}

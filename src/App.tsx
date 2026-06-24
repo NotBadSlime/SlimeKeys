@@ -1,3 +1,6 @@
+import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Download,
   FileMusic,
@@ -12,18 +15,107 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-
-const demoRules = [
-  ["C3", "Note On", "All", "Z", "Tap", "35 ms"],
-  ["D3", "Note On", "All", "X", "Tap", "35 ms"],
-  ["E3", "Note On", "All", "C", "Tap", "35 ms"],
-  ["F3", "Note On", "All", "V", "Tap", "35 ms"],
-  ["G3", "Note On", "All", "B", "Tap", "35 ms"],
-  ["A3", "Note On", "All", "N", "Tap", "35 ms"],
-  ["B3", "Note On", "All", "M", "Tap", "35 ms"],
-];
+import type { AppSnapshot, MidiEvent, MidiInputDevice, Preset } from "./types";
+import {
+  eventTypeLabel,
+  fallbackGenshinPreset,
+  formatNoteFilter,
+  summarizePreset,
+  triggerModeLabel,
+} from "./lib/presets";
 
 function App() {
+  const [presets, setPresets] = useState<Preset[]>([fallbackGenshinPreset()]);
+  const [selectedPresetId, setSelectedPresetId] = useState("genshin-21-key");
+  const [midiInputs, setMidiInputs] = useState<MidiInputDevice[]>([]);
+  const [selectedInputId, setSelectedInputId] = useState("");
+  const [outputEnabled, setOutputEnabled] = useState(false);
+  const [openedFile, setOpenedFile] = useState<string>("No MIDI file selected");
+  const [logs, setLogs] = useState<string[]>([
+    "Ready. Open a MIDI file or select a live input device.",
+    "Default preset uses Tap mode for game instruments.",
+  ]);
+
+  useEffect(() => {
+    void loadBackendState();
+  }, []);
+
+  const selectedPreset =
+    presets.find((preset) => preset.id === selectedPresetId) ?? presets[0];
+  const summary = useMemo(
+    () => summarizePreset(selectedPreset),
+    [selectedPreset],
+  );
+
+  async function loadBackendState() {
+    try {
+      const snapshot = await invoke<AppSnapshot>("get_app_snapshot");
+      setPresets(snapshot.presets);
+      setSelectedPresetId(snapshot.presets[0]?.id ?? "genshin-21-key");
+      setOutputEnabled(snapshot.outputEnabled);
+      pushLog("Backend connected.");
+    } catch {
+      pushLog("Running in preview mode without Tauri backend.");
+    }
+
+    try {
+      const devices = await invoke<MidiInputDevice[]>("list_midi_inputs");
+      setMidiInputs(devices);
+      if (devices[0]) {
+        setSelectedInputId(String(devices[0].id));
+      }
+    } catch {
+      setMidiInputs([]);
+    }
+  }
+
+  async function handleOpenMidi() {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "MIDI", extensions: ["mid", "midi"] }],
+      });
+      if (typeof selected !== "string") {
+        return;
+      }
+
+      setOpenedFile(fileName(selected));
+      const events = await invoke<MidiEvent[]>("parse_midi_file", {
+        path: selected,
+      });
+      pushLog(`Parsed ${events.length} MIDI note events from ${fileName(selected)}.`);
+    } catch (error) {
+      pushLog(`Open MIDI failed: ${readableError(error)}`);
+    }
+  }
+
+  async function handleOutputToggle(next: boolean) {
+    setOutputEnabled(next);
+    try {
+      const enabled = await invoke<boolean>("set_output_enabled", {
+        enabled: next,
+      });
+      setOutputEnabled(enabled);
+      pushLog(enabled ? "Keyboard output enabled." : "Keyboard output disabled.");
+    } catch (error) {
+      setOutputEnabled(false);
+      pushLog(`Output toggle failed: ${readableError(error)}`);
+    }
+  }
+
+  async function handleReleaseAll() {
+    try {
+      await invoke("panic_release_all_keys");
+      pushLog("Released all keys tracked by SlimeKeys.");
+    } catch (error) {
+      pushLog(`Release failed: ${readableError(error)}`);
+    }
+  }
+
+  function pushLog(message: string) {
+    setLogs((current) => [message, ...current].slice(0, 8));
+  }
+
   return (
     <main className="app-shell">
       <aside className="preset-panel" aria-label="Preset list">
@@ -50,16 +142,26 @@ function App() {
           </button>
         </div>
 
-        <button className="preset active" type="button">
-          <span>Genshin 21-Key</span>
-          <small>21 enabled rules</small>
-        </button>
+        {presets.map((preset) => {
+          const presetSummary = summarizePreset(preset);
+          return (
+            <button
+              className={`preset ${preset.id === selectedPreset.id ? "active" : ""}`}
+              key={preset.id}
+              onClick={() => setSelectedPresetId(preset.id)}
+              type="button"
+            >
+              <span>{preset.name}</span>
+              <small>{presetSummary.enabledRules} enabled rules</small>
+            </button>
+          );
+        })}
       </aside>
 
       <section className="workspace">
         <header className="toolbar">
           <div className="tool-group">
-            <button className="command primary" type="button">
+            <button className="command primary" onClick={handleOpenMidi} type="button">
               <FolderOpen size={16} />
               <span>Open MIDI</span>
             </button>
@@ -77,22 +179,34 @@ function App() {
           <div className="tool-group settings">
             <label>
               Speed
-              <input defaultValue="1.00" inputMode="decimal" />
+              <input value={selectedPreset.playback.speed.toFixed(2)} readOnly />
             </label>
             <label>
               Transpose
-              <input defaultValue="0" inputMode="numeric" />
+              <input value={selectedPreset.playback.transpose} readOnly />
             </label>
             <label>
               Delay
-              <input defaultValue="0 ms" />
+              <input value={`${selectedPreset.playback.globalDelayMs} ms`} readOnly />
             </label>
           </div>
 
           <div className="tool-group live-input">
             <RadioTower size={16} />
-            <select aria-label="MIDI input device">
-              <option>No MIDI device selected</option>
+            <select
+              aria-label="MIDI input device"
+              onChange={(event) => setSelectedInputId(event.target.value)}
+              value={selectedInputId}
+            >
+              {midiInputs.length === 0 ? (
+                <option value="">No MIDI device found</option>
+              ) : (
+                midiInputs.map((device) => (
+                  <option key={device.id} value={device.id}>
+                    {device.name}
+                  </option>
+                ))
+              )}
             </select>
             <label className="switch">
               <input type="checkbox" />
@@ -100,6 +214,12 @@ function App() {
             </label>
           </div>
         </header>
+
+        <section className="status-line">
+          <span>{openedFile}</span>
+          <span>{summary.enabledRules} enabled rules</span>
+          <span>{summary.triggerModes.map(triggerModeLabel).join(", ")}</span>
+        </section>
 
         <section className="content-grid">
           <section className="rules-section">
@@ -127,14 +247,21 @@ function App() {
                 <span>Mode</span>
                 <span>Press</span>
               </div>
-              {demoRules.map((rule) => (
-                <div className="rule-row" role="row" key={rule[0]}>
+              {selectedPreset.rules.map((rule) => (
+                <div className="rule-row" role="row" key={rule.id}>
                   <span>
-                    <input type="checkbox" defaultChecked />
+                    <input type="checkbox" checked={rule.enabled} readOnly />
                   </span>
-                  {rule.map((cell) => (
-                    <span key={cell}>{cell}</span>
-                  ))}
+                  <span title={formatNoteFilter(rule.note)}>{rule.name}</span>
+                  <span>{eventTypeLabel(rule.eventType)}</span>
+                  <span>{rule.inputSource}</span>
+                  <span>{rule.output.keys.join(" + ")}</span>
+                  <span>
+                    <span className={`mode-badge ${rule.triggerMode}`}>
+                      {triggerModeLabel(rule.triggerMode)}
+                    </span>
+                  </span>
+                  <span>{rule.pressDurationMs} ms</span>
                 </div>
               ))}
             </div>
@@ -145,31 +272,47 @@ function App() {
             <div className="output-toggle">
               <Keyboard size={18} />
               <div>
-                <strong>Key output disabled</strong>
+                <strong>
+                  {outputEnabled ? "Key output enabled" : "Key output disabled"}
+                </strong>
                 <span>Enable only when the target game is foreground.</span>
               </div>
-              <button className="command danger" type="button">
-                <Save size={16} />
-                <span>Release</span>
-              </button>
+              <label className="switch">
+                <input
+                  checked={outputEnabled}
+                  onChange={(event) => void handleOutputToggle(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Output</span>
+              </label>
             </div>
+
+            <button className="command danger release-command" onClick={handleReleaseAll} type="button">
+              <Save size={16} />
+              <span>Release All Keys</span>
+            </button>
 
             <h2>Recent Events</h2>
             <div className="log-list">
-              <p>
-                <FileMusic size={14} /> Ready. Open a MIDI file or select a live
-                input device.
-              </p>
-              <p>
-                <Keyboard size={14} /> Default preset uses Tap mode for game
-                instruments.
-              </p>
+              {logs.map((log) => (
+                <p key={log}>
+                  <FileMusic size={14} /> {log}
+                </p>
+              ))}
             </div>
           </section>
         </section>
       </section>
     </main>
   );
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+function readableError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export default App;
