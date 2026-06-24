@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Default SlimeKeys desktop capabilities.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister"
+  ]
 }

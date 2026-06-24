@@ -336,6 +336,7 @@ button:disabled {
 }
 
 .output-toggle,
+.hotkey-list,
 .log-list {
   border: 1px solid #ced8d1;
   border-radius: 8px;
@@ -352,6 +353,44 @@ button:disabled {
 
 .release-command {
   justify-content: center;
+}
+
+.hotkey-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.hotkey-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) minmax(98px, 1.1fr) 34px 34px;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #edf1ee;
+  padding: 4px 8px;
+}
+
+.hotkey-row:first-child {
+  border-top: 0;
+}
+
+.hotkey-row span,
+.hotkey-row kbd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hotkey-row kbd {
+  border: 1px solid #d6ded8;
+  border-radius: 6px;
+  background: #f7faf8;
+  color: #334139;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 7px;
+  text-align: center;
 }
 
 .output-toggle div {

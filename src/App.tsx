@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import {
   Download,
   FileMusic,
@@ -14,16 +15,34 @@ import {
   RadioTower,
   RefreshCw,
   Save,
+  SkipBack,
+  SkipForward,
   Square,
   Trash2,
 } from "lucide-react";
-import type { AppSnapshot, MidiEvent, MidiInputDevice, Preset } from "./types";
+import type {
+  AppSnapshot,
+  HotkeyAction,
+  HotkeyBinding,
+  MidiEvent,
+  MidiInputDevice,
+  Preset,
+  SongEntry,
+} from "./types";
 import {
   createTranslator,
   defaultLanguage,
   detectLanguage,
   type Language,
+  type TranslationKey,
 } from "./lib/i18n";
+import {
+  acceleratorFromKeyboardEvent,
+  DEFAULT_HOTKEYS,
+  mergeSavedHotkeys,
+  normalizeAccelerator,
+  validateHotkeyBindings,
+} from "./lib/hotkeys";
 import {
   eventTypeLabel,
   fallbackGenshinPreset,
@@ -31,6 +50,9 @@ import {
   summarizePreset,
   triggerModeLabel,
 } from "./lib/presets";
+import { selectRelativeSong, songEntryFromPath } from "./lib/songQueue";
+
+const HOTKEY_STORAGE_KEY = "slimekeys.hotkeys.v1";
 
 function App() {
   const [language, setLanguage] = useState<Language>(() =>
@@ -46,7 +68,22 @@ function App() {
   const [liveEnabled, setLiveEnabled] = useState(false);
   const [openedPath, setOpenedPath] = useState("");
   const [openedFile, setOpenedFile] = useState<string>("");
+  const [playlist, setPlaylist] = useState<SongEntry[]>([]);
+  const [currentSongIndex, setCurrentSongIndex] = useState(0);
+  const [hotkeys, setHotkeys] = useState<HotkeyBinding[]>(() =>
+    loadStoredHotkeys(),
+  );
+  const [recordingAction, setRecordingAction] = useState<HotkeyAction | null>(
+    null,
+  );
   const [logs, setLogs] = useState<string[]>([]);
+  const hotkeyHandlersRef = useRef<Record<HotkeyAction, () => void>>({
+    play: () => undefined,
+    stop: () => undefined,
+    next: () => undefined,
+    previous: () => undefined,
+    releaseAll: () => undefined,
+  });
   const t = useMemo(() => createTranslator(language), [language]);
 
   useEffect(() => {
@@ -66,15 +103,135 @@ function App() {
     setLogs([t("ready"), t("defaultPresetTap")]);
   }, [t]);
 
+  useEffect(() => {
+    hotkeyHandlersRef.current = {
+      play: () => void playSong(currentSong),
+      stop: () => void stopPlayback(true),
+      next: () => void moveSong(1),
+      previous: () => void moveSong(-1),
+      releaseAll: () => void handleReleaseAll(),
+    };
+  });
+
+  useEffect(() => {
+    if (!recordingAction) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const accelerator = acceleratorFromKeyboardEvent(event);
+      if (!accelerator) {
+        pushLog(t("hotkeyInvalid"));
+        setRecordingAction(null);
+        return;
+      }
+
+      const nextHotkeys = hotkeys.map((binding) =>
+        binding.action === recordingAction
+          ? { ...binding, accelerator, enabled: true }
+          : binding,
+      );
+      const validation = validateHotkeyBindings(nextHotkeys);
+      if (!validation.ok) {
+        pushLog(
+          validation.error === "duplicate"
+            ? t("hotkeyDuplicate")
+            : t("hotkeyInvalid"),
+        );
+        setRecordingAction(null);
+        return;
+      }
+
+      persistHotkeys(nextHotkeys);
+      setHotkeys(nextHotkeys);
+      setRecordingAction(null);
+      pushLog(`${t("hotkeySaved")}: ${accelerator}`);
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [hotkeys, recordingAction, t]);
+
+  useEffect(() => {
+    const validation = validateHotkeyBindings(hotkeys);
+    if (!validation.ok) {
+      pushLog(
+        validation.error === "duplicate"
+          ? t("hotkeyDuplicate")
+          : t("hotkeyInvalid"),
+      );
+      return;
+    }
+
+    const enabledBindings = hotkeys.filter(
+      (binding) => binding.enabled && binding.accelerator.trim(),
+    );
+    if (enabledBindings.length === 0) {
+      return;
+    }
+
+    const shortcuts = enabledBindings.map((binding) => binding.accelerator);
+    const actionByShortcut = new Map(
+      enabledBindings.map((binding) => [
+        normalizeAccelerator(binding.accelerator).toLowerCase(),
+        binding.action,
+      ]),
+    );
+    let disposed = false;
+
+    const registration = register(shortcuts, (event) => {
+      if (event.state !== "Pressed") {
+        return;
+      }
+
+      const action = actionByShortcut.get(
+        normalizeAccelerator(event.shortcut).toLowerCase(),
+      );
+      if (action) {
+        hotkeyHandlersRef.current[action]();
+      }
+    })
+      .then(() => {
+        if (!disposed) {
+          pushLog(t("hotkeyRegistered"));
+        }
+      })
+      .catch((error) => {
+        if (!disposed) {
+          pushLog(`${t("hotkeyRegistrationFailed")}: ${readableError(error)}`);
+        }
+      });
+
+    return () => {
+      disposed = true;
+      void registration
+        .then(() => unregister(shortcuts))
+        .catch(() => undefined);
+    };
+  }, [hotkeys, t]);
+
   const selectedPreset =
     presets.find((preset) => preset.id === selectedPresetId) ?? presets[0];
   const selectedMidiInput = midiInputs.find(
     (device) => String(device.id) === selectedInputId,
   );
+  const currentSong =
+    playlist[currentSongIndex] ??
+    (openedPath ? songEntryFromPath(openedPath) : null);
   const summary = useMemo(
     () => summarizePreset(selectedPreset),
     [selectedPreset],
   );
+  const hotkeyActionLabels: Record<HotkeyAction, TranslationKey> = {
+    play: "hotkeyPlay",
+    stop: "hotkeyStop",
+    next: "hotkeyNext",
+    previous: "hotkeyPrevious",
+    releaseAll: "hotkeyReleaseAll",
+  };
 
   async function loadBackendState() {
     try {
@@ -115,46 +272,128 @@ function App() {
   async function handleOpenMidi() {
     try {
       const selected = await open({
-        multiple: false,
+        multiple: true,
         filters: [{ name: "MIDI", extensions: ["mid", "midi"] }],
       });
-      if (typeof selected !== "string") {
+      const paths =
+        typeof selected === "string"
+          ? [selected]
+          : Array.isArray(selected)
+            ? selected
+            : [];
+      if (paths.length === 0) {
         return;
       }
 
-      setOpenedPath(selected);
-      setOpenedFile(fileName(selected));
-      const events = await invoke<MidiEvent[]>("parse_midi_file", {
-        path: selected,
-      });
-      pushLog(`${t("parsedMidiEvents")}: ${events.length} (${fileName(selected)})`);
+      const songs = paths.map(songEntryFromPath);
+      setPlaylist(songs);
+      setCurrentSongIndex(0);
+      await loadSong(songs[0], true);
     } catch (error) {
       pushLog(`${t("openMidiFailed")}: ${readableError(error)}`);
     }
   }
 
   async function handlePlay() {
+    await playSong(currentSong);
+  }
+
+  async function playSong(song: SongEntry | null) {
+    if (!song) {
+      pushLog(t("openBeforePlayback"));
+      return;
+    }
+
+    try {
+      if (song.path !== openedPath) {
+        await loadSong(song, false);
+      }
+      await startPlayback(song);
+    } catch (error) {
+      pushLog(`${t("playbackFailed")}: ${readableError(error)}`);
+    }
+  }
+
+  async function startPlayback(song: SongEntry) {
+    const actionCount = await invoke<number>("play_midi_file", {
+      path: song.path,
+    });
+    pushLog(`${t("playbackStarted")}: ${actionCount}`);
+  }
+
+  async function handleStop() {
+    await stopPlayback(true);
+  }
+
+  async function stopPlayback(log: boolean) {
+    try {
+      await invoke("stop_playback");
+      if (log) {
+        pushLog(t("playbackStopped"));
+      }
+    } catch (error) {
+      pushLog(`${t("stopFailed")}: ${readableError(error)}`);
+    }
+  }
+
+  async function loadSong(song: SongEntry, logParsed: boolean) {
+    setOpenedPath(song.path);
+    setOpenedFile(song.name);
+    const events = await invoke<MidiEvent[]>("parse_midi_file", {
+      path: song.path,
+    });
+    if (logParsed) {
+      pushLog(`${t("parsedMidiEvents")}: ${events.length} (${song.name})`);
+    }
+  }
+
+  async function moveSong(direction: 1 | -1) {
     if (!openedPath) {
       pushLog(t("openBeforePlayback"));
       return;
     }
 
     try {
-      const actionCount = await invoke<number>("play_midi_file", {
-        path: openedPath,
+      const folderSongs =
+        playlist.length > 1
+          ? []
+          : (
+              await invoke<string[]>("list_midi_files_near", {
+                path: openedPath,
+              })
+            ).map(songEntryFromPath);
+      if (playlist.length <= 1 && folderSongs.length <= 1) {
+        pushLog(t("noMidiFilesFound"));
+        return;
+      }
+      const selectedSong = selectRelativeSong({
+        currentPath: openedPath,
+        direction,
+        playlist,
+        folderSongs,
       });
-      pushLog(`${t("playbackStarted")}: ${actionCount}`);
+
+      if (!selectedSong) {
+        pushLog(t("noMidiFilesFound"));
+        return;
+      }
+
+      await stopPlayback(false);
+      if (playlist.length > 1) {
+        setCurrentSongIndex(
+          Math.max(
+            0,
+            playlist.findIndex((song) => song.path === selectedSong.path),
+          ),
+        );
+      } else {
+        setPlaylist([selectedSong]);
+        setCurrentSongIndex(0);
+      }
+      await loadSong(selectedSong, false);
+      await startPlayback(selectedSong);
     } catch (error) {
       pushLog(`${t("playbackFailed")}: ${readableError(error)}`);
-    }
-  }
-
-  async function handleStop() {
-    try {
-      await invoke("stop_playback");
-      pushLog(t("playbackStopped"));
-    } catch (error) {
-      pushLog(`${t("stopFailed")}: ${readableError(error)}`);
     }
   }
 
@@ -212,6 +451,30 @@ function App() {
     }
   }
 
+  function handleRecordHotkey(action: HotkeyAction) {
+    setRecordingAction(action);
+    pushLog(`${t("hotkeyRecording")}: ${t(hotkeyActionLabels[action])}`);
+  }
+
+  function handleClearHotkey(action: HotkeyAction) {
+    updateHotkeys(
+      hotkeys.map((binding) =>
+        binding.action === action
+          ? { ...binding, accelerator: "", enabled: false }
+          : binding,
+      ),
+    );
+    if (recordingAction === action) {
+      setRecordingAction(null);
+    }
+    pushLog(`${t("hotkeyCleared")}: ${t(hotkeyActionLabels[action])}`);
+  }
+
+  function updateHotkeys(nextHotkeys: HotkeyBinding[]) {
+    persistHotkeys(nextHotkeys);
+    setHotkeys(nextHotkeys);
+  }
+
   function pushLog(message: string) {
     setLogs((current) => [message, ...current].slice(0, 8));
   }
@@ -265,6 +528,14 @@ function App() {
               <FolderOpen size={16} />
               <span>{t("openMidi")}</span>
             </button>
+            <button
+              className="icon-command"
+              onClick={() => void moveSong(-1)}
+              title={t("hotkeyPrevious")}
+              type="button"
+            >
+              <SkipBack size={16} />
+            </button>
             <button className="icon-command" onClick={handlePlay} title={t("play")} type="button">
               <Play size={16} />
             </button>
@@ -273,6 +544,14 @@ function App() {
             </button>
             <button className="icon-command" onClick={handleStop} title={t("stop")} type="button">
               <Square size={16} />
+            </button>
+            <button
+              className="icon-command"
+              onClick={() => void moveSong(1)}
+              title={t("hotkeyNext")}
+              type="button"
+            >
+              <SkipForward size={16} />
             </button>
           </div>
 
@@ -417,6 +696,39 @@ function App() {
               <span>{t("releaseAllKeys")}</span>
             </button>
 
+            <h2>{t("hotkeys")}</h2>
+            <div className="hotkey-list">
+              {hotkeys.map((binding) => (
+                <div className="hotkey-row" key={binding.action}>
+                  <span>{t(hotkeyActionLabels[binding.action])}</span>
+                  <kbd>
+                    {recordingAction === binding.action
+                      ? t("hotkeyRecordingShort")
+                      : binding.enabled && binding.accelerator
+                        ? binding.accelerator
+                        : t("hotkeyUnset")}
+                  </kbd>
+                  <button
+                    className="icon-command"
+                    onClick={() => handleRecordHotkey(binding.action)}
+                    title={t("recordHotkey")}
+                    type="button"
+                  >
+                    <Keyboard size={15} />
+                  </button>
+                  <button
+                    className="icon-command"
+                    disabled={!binding.accelerator}
+                    onClick={() => handleClearHotkey(binding.action)}
+                    title={t("clearHotkey")}
+                    type="button"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
             <h2>{t("recentEvents")}</h2>
             <div className="log-list">
               {logs.map((log) => (
@@ -432,8 +744,22 @@ function App() {
   );
 }
 
-function fileName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
+function loadStoredHotkeys(): HotkeyBinding[] {
+  try {
+    const saved = window.localStorage.getItem(HOTKEY_STORAGE_KEY);
+    const hotkeys = mergeSavedHotkeys(saved ? JSON.parse(saved) : null);
+    return validateHotkeyBindings(hotkeys).ok ? hotkeys : DEFAULT_HOTKEYS;
+  } catch {
+    return DEFAULT_HOTKEYS;
+  }
+}
+
+function persistHotkeys(hotkeys: HotkeyBinding[]) {
+  try {
+    window.localStorage.setItem(HOTKEY_STORAGE_KEY, JSON.stringify(hotkeys));
+  } catch {
+    // Local storage is best-effort; the in-memory setting still applies.
+  }
 }
 
 function readableError(error: unknown): string {
