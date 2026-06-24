@@ -27,12 +27,12 @@ pub enum MidiInputError {
 }
 
 pub fn list_midi_input_devices() -> Result<Vec<MidiInputDevice>, MidiInputError> {
-    let mut devices = list_winmm_midi_input_devices()?;
+    let mut devices = list_runtime_midi_input_devices()?;
     append_windows_midi_services_devices(&mut devices);
     Ok(devices)
 }
 
-fn list_winmm_midi_input_devices() -> Result<Vec<MidiInputDevice>, MidiInputError> {
+fn list_runtime_midi_input_devices() -> Result<Vec<MidiInputDevice>, MidiInputError> {
     let input =
         midir::MidiInput::new("SlimeKeys").map_err(|err| MidiInputError::Init(err.to_string()))?;
 
@@ -46,13 +46,23 @@ fn list_winmm_midi_input_devices() -> Result<Vec<MidiInputDevice>, MidiInputErro
                 .map(|name| MidiInputDevice {
                     id,
                     name,
-                    source: MidiInputSource::WinMm,
+                    source: runtime_midi_input_source(),
                     available_for_live: true,
                     note: None,
                 })
                 .map_err(|err| MidiInputError::PortName(err.to_string()))
         })
         .collect()
+}
+
+#[cfg(windows)]
+fn runtime_midi_input_source() -> MidiInputSource {
+    MidiInputSource::WindowsMidiServices
+}
+
+#[cfg(not(windows))]
+fn runtime_midi_input_source() -> MidiInputSource {
+    MidiInputSource::WinMm
 }
 
 #[cfg(windows)]
@@ -123,7 +133,7 @@ fn append_windows_midi_services_device_names(
             source: MidiInputSource::WindowsMidiServices,
             available_for_live: false,
             note: Some(
-                "Detected through Windows MIDI Services. Live input support for this driver path is not enabled yet."
+                "Detected by Windows, but it is not exposed to SlimeKeys' live input backend yet."
                     .to_string(),
             ),
         });
@@ -172,6 +182,30 @@ mod tests {
 
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].name, "loopMIDI Port");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn loopmidi_windows_services_device_is_available_for_live_when_present() {
+        let has_loopmidi = windows_midi_services_device_names()
+            .iter()
+            .any(|name| normalize_device_name(name) == normalize_device_name("loopMIDI Port"));
+        if !has_loopmidi {
+            return;
+        }
+
+        let devices = list_midi_input_devices().unwrap();
+        let loopmidi = devices
+            .iter()
+            .find(|device| {
+                normalize_device_name(&device.name) == normalize_device_name("loopMIDI Port")
+            })
+            .expect("loopMIDI Port should be listed when Windows reports it");
+
+        assert!(
+            loopmidi.available_for_live,
+            "loopMIDI Port was detected but is not available for Live: {devices:?}"
+        );
     }
 
     fn append_test_devices(devices: &mut Vec<MidiInputDevice>, names: Vec<String>) {

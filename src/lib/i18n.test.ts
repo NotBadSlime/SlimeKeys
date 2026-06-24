@@ -13,4 +13,10 @@ describe("createTranslator", () => {
 
     expect(t("openMidi")).toBe("Open MIDI");
   });
+
+  it("labels devices that are detected but not live-capable", () => {
+    const t = createTranslator("zh");
+
+    expect(t("detectedOnly")).toBe("仅识别");
+  });
 });

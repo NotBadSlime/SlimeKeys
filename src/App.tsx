@@ -304,7 +304,7 @@ function App() {
                 midiInputs.map((device) => (
                   <option key={device.id} value={device.id}>
                     {device.name}
-                    {device.availableForLive ? "" : " (MIDI Services)"}
+                    {device.availableForLive ? "" : ` (${t("detectedOnly")})`}
                   </option>
                 ))
               )}
