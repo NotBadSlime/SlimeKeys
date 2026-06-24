@@ -52,4 +52,16 @@ describe("hotkey helpers", () => {
     });
     expect(merged.map((binding) => binding.action)).not.toContain("unknown");
   });
+
+  it("keeps cleared disabled bindings when loading saved settings", () => {
+    const merged = mergeSavedHotkeys([
+      { action: "next", accelerator: "", enabled: false },
+    ]);
+
+    expect(merged.find((binding) => binding.action === "next")).toEqual({
+      action: "next",
+      accelerator: "",
+      enabled: false,
+    });
+  });
 });

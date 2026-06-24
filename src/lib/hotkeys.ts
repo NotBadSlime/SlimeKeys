@@ -84,7 +84,13 @@ export function mergeSavedHotkeys(saved: unknown): HotkeyBinding[] {
 
   return DEFAULT_HOTKEYS.map((defaultBinding) => {
     const savedBinding = byAction.get(defaultBinding.action);
-    return savedBinding?.accelerator ? savedBinding : { ...defaultBinding };
+    if (!savedBinding) {
+      return { ...defaultBinding };
+    }
+
+    return savedBinding.accelerator || !savedBinding.enabled
+      ? savedBinding
+      : { ...defaultBinding };
   });
 }
 
