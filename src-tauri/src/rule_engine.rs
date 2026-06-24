@@ -50,7 +50,9 @@ pub fn rule_matches(rule: &Rule, event: &MidiEvent) -> bool {
         && source_matches(&rule.input_source, &event.input_source)
         && event_type_matches(rule, event)
         && rule.track.map_or(true, |track| Some(track) == event.track)
-        && rule.channel.map_or(true, |channel| channel == event.channel)
+        && rule
+            .channel
+            .map_or(true, |channel| channel == event.channel)
         && note_matches(&rule.note, event.note)
         && velocity_matches(rule, event)
 }

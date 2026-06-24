@@ -1,8 +1,8 @@
-pub mod model;
 pub mod commands;
 pub mod keyboard;
 pub mod midi_file;
 pub mod midi_input;
+pub mod model;
 pub mod presets;
 pub mod rule_engine;
 

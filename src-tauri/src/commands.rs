@@ -43,7 +43,9 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             output_enabled: Arc::new(Mutex::new(false)),
-            keyboard: Arc::new(Mutex::new(TrackedKeyboardOutput::new(platform_keyboard_sink()))),
+            keyboard: Arc::new(Mutex::new(TrackedKeyboardOutput::new(
+                platform_keyboard_sink(),
+            ))),
             playback_cancel: Mutex::new(None),
             live_connection: Mutex::new(None),
         }
@@ -284,7 +286,10 @@ fn dispatch_actions<S>(
                 break;
             }
 
-            let enabled = output_enabled.lock().map(|enabled| *enabled).unwrap_or(false);
+            let enabled = output_enabled
+                .lock()
+                .map(|enabled| *enabled)
+                .unwrap_or(false);
             if !enabled {
                 continue;
             }
