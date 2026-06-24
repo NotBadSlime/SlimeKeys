@@ -9,6 +9,11 @@ export interface HotkeyBinding {
   enabled: boolean;
 }
 
+export interface SongEntry {
+  path: string;
+  name: string;
+}
+
 export interface OctaveFold {
   enabled: boolean;
   minNote: number;
