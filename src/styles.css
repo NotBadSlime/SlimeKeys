@@ -13,7 +13,6 @@
 
 body {
   margin: 0;
-  min-width: 960px;
   min-height: 640px;
 }
 
@@ -42,7 +41,7 @@ button:disabled {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px minmax(700px, 1fr);
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   min-height: 100vh;
   background: #eef2ee;
 }
@@ -133,8 +132,9 @@ button:disabled {
 }
 
 .toolbar {
-  display: grid;
-  grid-template-columns: max-content minmax(260px, 1fr) minmax(260px, 380px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 12px;
   border-bottom: 1px solid #ced8d1;
   background: #ffffff;
@@ -169,6 +169,10 @@ button:disabled {
   padding: 0 12px;
 }
 
+.command span {
+  white-space: nowrap;
+}
+
 .command.primary {
   border-color: #2f7f5f;
   background: #2f7f5f;
@@ -181,16 +185,18 @@ button:disabled {
 }
 
 .settings {
-  justify-content: center;
+  flex: 0 1 auto;
+  justify-content: flex-start;
 }
 
 .settings label {
   display: grid;
-  grid-template-columns: max-content 70px;
+  grid-template-columns: max-content 86px;
   align-items: center;
   gap: 6px;
   color: #5d6b62;
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .settings input,
@@ -205,11 +211,14 @@ button:disabled {
 }
 
 .live-input {
+  flex: 1 1 360px;
   justify-content: flex-end;
+  margin-left: auto;
+  min-width: 0;
 }
 
 .live-input select {
-  width: 210px;
+  width: clamp(160px, 22vw, 260px);
 }
 
 .switch {
@@ -218,11 +227,23 @@ button:disabled {
   gap: 6px;
   color: #3c4a41;
   font-size: 13px;
+  white-space: nowrap;
+}
+
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #3c4a41;
+}
+
+.language-switch select {
+  width: 96px;
 }
 
 .content-grid {
   display: grid;
-  grid-template-columns: minmax(620px, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
   gap: 16px;
   min-height: 0;
   padding: 16px;
@@ -353,4 +374,14 @@ button:disabled {
   align-items: center;
   gap: 8px;
   margin: 0;
+}
+
+@media (max-width: 1120px) {
+  .content-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inspector {
+    order: -1;
+  }
 }

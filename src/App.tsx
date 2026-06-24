@@ -7,15 +7,23 @@ import {
   FolderOpen,
   Import,
   Keyboard,
+  Languages,
   Pause,
   Play,
   Plus,
   RadioTower,
+  RefreshCw,
   Save,
   Square,
   Trash2,
 } from "lucide-react";
 import type { AppSnapshot, MidiEvent, MidiInputDevice, Preset } from "./types";
+import {
+  createTranslator,
+  defaultLanguage,
+  detectLanguage,
+  type Language,
+} from "./lib/i18n";
 import {
   eventTypeLabel,
   fallbackGenshinPreset,
@@ -25,6 +33,11 @@ import {
 } from "./lib/presets";
 
 function App() {
+  const [language, setLanguage] = useState<Language>(() =>
+    typeof navigator === "undefined"
+      ? defaultLanguage
+      : detectLanguage(navigator.language),
+  );
   const [presets, setPresets] = useState<Preset[]>([fallbackGenshinPreset()]);
   const [selectedPresetId, setSelectedPresetId] = useState("genshin-21-key");
   const [midiInputs, setMidiInputs] = useState<MidiInputDevice[]>([]);
@@ -32,15 +45,26 @@ function App() {
   const [outputEnabled, setOutputEnabled] = useState(false);
   const [liveEnabled, setLiveEnabled] = useState(false);
   const [openedPath, setOpenedPath] = useState("");
-  const [openedFile, setOpenedFile] = useState<string>("No MIDI file selected");
-  const [logs, setLogs] = useState<string[]>([
-    "Ready. Open a MIDI file or select a live input device.",
-    "Default preset uses Tap mode for game instruments.",
-  ]);
+  const [openedFile, setOpenedFile] = useState<string>("");
+  const [logs, setLogs] = useState<string[]>([]);
+  const t = useMemo(() => createTranslator(language), [language]);
 
   useEffect(() => {
     void loadBackendState();
-  }, []);
+    const refreshTimer = window.setInterval(() => {
+      if (!liveEnabled) {
+        void refreshMidiInputs(true);
+      }
+    }, 3000);
+
+    return () => window.clearInterval(refreshTimer);
+    // This intentionally tracks language so initial logs switch after a language change.
+  }, [language, liveEnabled]);
+
+  useEffect(() => {
+    setOpenedFile((current) => current || t("noMidiFile"));
+    setLogs([t("ready"), t("defaultPresetTap")]);
+  }, [t]);
 
   const selectedPreset =
     presets.find((preset) => preset.id === selectedPresetId) ?? presets[0];
@@ -55,19 +79,33 @@ function App() {
       setPresets(snapshot.presets);
       setSelectedPresetId(snapshot.presets[0]?.id ?? "genshin-21-key");
       setOutputEnabled(snapshot.outputEnabled);
-      pushLog("Backend connected.");
+      pushLog(t("backendConnected"));
     } catch {
-      pushLog("Running in preview mode without Tauri backend.");
+      pushLog(t("previewMode"));
     }
 
+    await refreshMidiInputs(true);
+  }
+
+  async function refreshMidiInputs(silent = false) {
     try {
       const devices = await invoke<MidiInputDevice[]>("list_midi_inputs");
       setMidiInputs(devices);
       if (devices[0]) {
-        setSelectedInputId(String(devices[0].id));
+        setSelectedInputId((current) => current || String(devices[0].id));
+      }
+      if (!silent) {
+        pushLog(
+          devices.length > 0
+            ? `${t("midiDevicesFound")}: ${devices.map((device) => device.name).join(", ")}`
+            : t("midiDevicesNotFound"),
+        );
       }
     } catch {
       setMidiInputs([]);
+      if (!silent) {
+        pushLog(t("midiDevicesRefreshFailed"));
+      }
     }
   }
 
@@ -86,15 +124,15 @@ function App() {
       const events = await invoke<MidiEvent[]>("parse_midi_file", {
         path: selected,
       });
-      pushLog(`Parsed ${events.length} MIDI note events from ${fileName(selected)}.`);
+      pushLog(`${t("parsedMidiEvents")}: ${events.length} (${fileName(selected)})`);
     } catch (error) {
-      pushLog(`Open MIDI failed: ${readableError(error)}`);
+      pushLog(`${t("openMidiFailed")}: ${readableError(error)}`);
     }
   }
 
   async function handlePlay() {
     if (!openedPath) {
-      pushLog("Open a MIDI file before playback.");
+      pushLog(t("openBeforePlayback"));
       return;
     }
 
@@ -102,24 +140,24 @@ function App() {
       const actionCount = await invoke<number>("play_midi_file", {
         path: openedPath,
       });
-      pushLog(`Playback started with ${actionCount} scheduled key actions.`);
+      pushLog(`${t("playbackStarted")}: ${actionCount}`);
     } catch (error) {
-      pushLog(`Playback failed: ${readableError(error)}`);
+      pushLog(`${t("playbackFailed")}: ${readableError(error)}`);
     }
   }
 
   async function handleStop() {
     try {
       await invoke("stop_playback");
-      pushLog("Playback stopped and held keys released.");
+      pushLog(t("playbackStopped"));
     } catch (error) {
-      pushLog(`Stop failed: ${readableError(error)}`);
+      pushLog(`${t("stopFailed")}: ${readableError(error)}`);
     }
   }
 
   async function handleLiveToggle(next: boolean) {
     if (next && selectedInputId === "") {
-      pushLog("Select a MIDI input device before enabling live input.");
+      pushLog(t("selectMidiBeforeLive"));
       return;
     }
 
@@ -129,14 +167,14 @@ function App() {
         await invoke("start_live_input", {
           deviceId: Number(selectedInputId),
         });
-        pushLog("Live MIDI input enabled.");
+        pushLog(t("liveInputEnabled"));
       } else {
         await invoke("stop_live_input");
-        pushLog("Live MIDI input disabled and held keys released.");
+        pushLog(t("liveInputDisabled"));
       }
     } catch (error) {
       setLiveEnabled(false);
-      pushLog(`Live input failed: ${readableError(error)}`);
+      pushLog(`${t("liveFailed")}: ${readableError(error)}`);
     }
   }
 
@@ -147,19 +185,19 @@ function App() {
         enabled: next,
       });
       setOutputEnabled(enabled);
-      pushLog(enabled ? "Keyboard output enabled." : "Keyboard output disabled.");
+      pushLog(enabled ? t("outputEnabledLog") : t("outputDisabledLog"));
     } catch (error) {
       setOutputEnabled(false);
-      pushLog(`Output toggle failed: ${readableError(error)}`);
+      pushLog(`${t("outputToggleFailed")}: ${readableError(error)}`);
     }
   }
 
   async function handleReleaseAll() {
     try {
       await invoke("panic_release_all_keys");
-      pushLog("Released all keys tracked by SlimeKeys.");
+      pushLog(t("releasedKeys"));
     } catch (error) {
-      pushLog(`Release failed: ${readableError(error)}`);
+      pushLog(`${t("releaseFailed")}: ${readableError(error)}`);
     }
   }
 
@@ -182,10 +220,10 @@ function App() {
           <button title="New preset" type="button">
             <Plus size={16} />
           </button>
-          <button title="Import preset" type="button">
+          <button title={t("importPreset")} type="button">
             <Import size={16} />
           </button>
-          <button title="Export preset" type="button">
+          <button title={t("exportPreset")} type="button">
             <Download size={16} />
           </button>
           <button title="Delete preset" type="button">
@@ -214,30 +252,30 @@ function App() {
           <div className="tool-group">
             <button className="command primary" onClick={handleOpenMidi} type="button">
               <FolderOpen size={16} />
-              <span>Open MIDI</span>
+              <span>{t("openMidi")}</span>
             </button>
-            <button className="icon-command" onClick={handlePlay} title="Play" type="button">
+            <button className="icon-command" onClick={handlePlay} title={t("play")} type="button">
               <Play size={16} />
             </button>
-            <button className="icon-command" disabled title="Pause" type="button">
+            <button className="icon-command" disabled title={t("pause")} type="button">
               <Pause size={16} />
             </button>
-            <button className="icon-command" onClick={handleStop} title="Stop" type="button">
+            <button className="icon-command" onClick={handleStop} title={t("stop")} type="button">
               <Square size={16} />
             </button>
           </div>
 
           <div className="tool-group settings">
             <label>
-              Speed
+              {t("speed")}
               <input value={selectedPreset.playback.speed.toFixed(2)} readOnly />
             </label>
             <label>
-              Transpose
+              {t("transpose")}
               <input value={selectedPreset.playback.transpose} readOnly />
             </label>
             <label>
-              Delay
+              {t("delay")}
               <input value={`${selectedPreset.playback.globalDelayMs} ms`} readOnly />
             </label>
           </div>
@@ -245,12 +283,12 @@ function App() {
           <div className="tool-group live-input">
             <RadioTower size={16} />
             <select
-              aria-label="MIDI input device"
+              aria-label={t("midiInput")}
               onChange={(event) => setSelectedInputId(event.target.value)}
               value={selectedInputId}
             >
               {midiInputs.length === 0 ? (
-                <option value="">No MIDI device found</option>
+                <option value="">{t("noMidiDeviceFound")}</option>
               ) : (
                 midiInputs.map((device) => (
                   <option key={device.id} value={device.id}>
@@ -259,13 +297,32 @@ function App() {
                 ))
               )}
             </select>
+            <button
+              className="icon-command"
+              onClick={() => void refreshMidiInputs(false)}
+              title={t("refreshMidi")}
+              type="button"
+            >
+              <RefreshCw size={16} />
+            </button>
             <label className="switch">
               <input
                 checked={liveEnabled}
                 onChange={(event) => void handleLiveToggle(event.target.checked)}
                 type="checkbox"
               />
-              <span>Live</span>
+              <span>{t("live")}</span>
+            </label>
+            <label className="language-switch">
+              <Languages size={16} />
+              <select
+                aria-label={t("language")}
+                onChange={(event) => setLanguage(event.target.value as Language)}
+                value={language}
+              >
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
             </label>
           </div>
         </header>
@@ -280,15 +337,12 @@ function App() {
           <section className="rules-section">
             <div className="section-heading">
               <div>
-                <h2>Rules</h2>
-                <p>
-                  If repeated notes sound like one long press, use Tap or
-                  Retrigger. Start with an 8-20 ms release gap.
-                </p>
+                <h2>{t("rules")}</h2>
+                <p>{t("triggerHint")}</p>
               </div>
               <button className="command" type="button">
                 <Plus size={16} />
-                <span>Add Rule</span>
+                <span>{t("addRule")}</span>
               </button>
             </div>
 
@@ -323,14 +377,14 @@ function App() {
           </section>
 
           <section className="inspector">
-            <h2>Output</h2>
+            <h2>{t("output")}</h2>
             <div className="output-toggle">
               <Keyboard size={18} />
               <div>
                 <strong>
-                  {outputEnabled ? "Key output enabled" : "Key output disabled"}
+                  {outputEnabled ? t("keyOutputEnabled") : t("keyOutputDisabled")}
                 </strong>
-                <span>Enable only when the target game is foreground.</span>
+                <span>{t("outputSafety")}</span>
               </div>
               <label className="switch">
                 <input
@@ -338,16 +392,16 @@ function App() {
                   onChange={(event) => void handleOutputToggle(event.target.checked)}
                   type="checkbox"
                 />
-                <span>Output</span>
+                <span>{t("output")}</span>
               </label>
             </div>
 
             <button className="command danger release-command" onClick={handleReleaseAll} type="button">
               <Save size={16} />
-              <span>Release All Keys</span>
+              <span>{t("releaseAllKeys")}</span>
             </button>
 
-            <h2>Recent Events</h2>
+            <h2>{t("recentEvents")}</h2>
             <div className="log-list">
               {logs.map((log) => (
                 <p key={log}>
