@@ -1,5 +1,6 @@
 pub mod model;
 pub mod presets;
+pub mod rule_engine;
 
 #[tauri::command]
 fn ping() -> &'static str {
