@@ -1,5 +1,6 @@
 use std::{
     fs,
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -124,6 +125,16 @@ pub fn list_midi_inputs() -> Result<Vec<MidiInputDevice>, String> {
 pub fn parse_midi_file(path: String) -> Result<Vec<MidiEvent>, String> {
     let bytes = fs::read(&path).map_err(|err| format!("failed to read MIDI file: {err}"))?;
     parse_midi_bytes(&bytes).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_midi_files_near(path: String) -> Result<Vec<String>, String> {
+    let source = Path::new(&path);
+    let dir = source
+        .parent()
+        .ok_or_else(|| format!("failed to read parent folder for {path}"))?;
+
+    list_midi_files_in_dir(dir)
 }
 
 #[tauri::command]
@@ -260,6 +271,31 @@ fn release_all(state: &State<'_, AppState>) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
+fn list_midi_files_in_dir(dir: &Path) -> Result<Vec<String>, String> {
+    let mut files = fs::read_dir(dir)
+        .map_err(|err| format!("failed to read MIDI folder: {err}"))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && is_midi_file_path(path))
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+
+    files.sort_by_key(|path| {
+        Path::new(path)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    });
+
+    Ok(files)
+}
+
+fn is_midi_file_path(path: &Path) -> bool {
+    path.extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase())
+        .is_some_and(|extension| extension == "mid" || extension == "midi")
+}
+
 fn dispatch_actions<S>(
     actions: Vec<KeyAction>,
     output_enabled: Arc<Mutex<bool>>,
@@ -344,6 +380,7 @@ fn midi_message_to_event(message: &[u8]) -> Option<MidiEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn app_snapshot_contains_default_preset_and_no_active_output() {
@@ -375,5 +412,61 @@ mod tests {
         assert_eq!(actions[1].key, "Z");
         assert_eq!(actions[1].kind, crate::model::KeyActionKind::Up);
         assert_eq!(actions[1].at_ms, 135);
+    }
+
+    #[test]
+    fn list_midi_files_in_dir_includes_midi_extensions_and_sorts_names() {
+        let dir =
+            create_test_dir("list_midi_files_in_dir_includes_midi_extensions_and_sorts_names");
+        fs::write(dir.join("beta.midi"), []).unwrap();
+        fs::write(dir.join("alpha.mid"), []).unwrap();
+        fs::write(dir.join("notes.txt"), []).unwrap();
+
+        let files = list_midi_files_in_dir(&dir).unwrap();
+
+        assert_eq!(
+            file_names(&files),
+            vec!["alpha.mid".to_string(), "beta.midi".to_string()]
+        );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn list_midi_files_in_dir_matches_extensions_case_insensitively() {
+        let dir = create_test_dir("list_midi_files_in_dir_matches_extensions_case_insensitively");
+        fs::write(dir.join("LOUD.MID"), []).unwrap();
+        fs::write(dir.join("soft.Midi"), []).unwrap();
+
+        let files = list_midi_files_in_dir(&dir).unwrap();
+
+        assert_eq!(
+            file_names(&files),
+            vec!["LOUD.MID".to_string(), "soft.Midi".to_string()]
+        );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn create_test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("slimekeys-{name}-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).unwrap();
+        }
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn file_names(paths: &[String]) -> Vec<String> {
+        paths
+            .iter()
+            .map(|path| {
+                std::path::Path::new(path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect()
     }
 }
