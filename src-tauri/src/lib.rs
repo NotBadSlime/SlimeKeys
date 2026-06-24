@@ -1,4 +1,5 @@
 pub mod model;
+pub mod keyboard;
 pub mod midi_file;
 pub mod midi_input;
 pub mod presets;
