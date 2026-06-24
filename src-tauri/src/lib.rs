@@ -1,3 +1,6 @@
+pub mod model;
+pub mod presets;
+
 #[tauri::command]
 fn ping() -> &'static str {
     "slimekeys-ready"
