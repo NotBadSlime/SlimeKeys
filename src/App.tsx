@@ -68,6 +68,9 @@ function App() {
 
   const selectedPreset =
     presets.find((preset) => preset.id === selectedPresetId) ?? presets[0];
+  const selectedMidiInput = midiInputs.find(
+    (device) => String(device.id) === selectedInputId,
+  );
   const summary = useMemo(
     () => summarizePreset(selectedPreset),
     [selectedPreset],
@@ -156,8 +159,16 @@ function App() {
   }
 
   async function handleLiveToggle(next: boolean) {
+    const selectedDevice = midiInputs.find(
+      (device) => String(device.id) === selectedInputId,
+    );
+
     if (next && selectedInputId === "") {
       pushLog(t("selectMidiBeforeLive"));
+      return;
+    }
+    if (next && selectedDevice && !selectedDevice.availableForLive) {
+      pushLog(selectedDevice.note ?? t("midiServicesDetected"));
       return;
     }
 
@@ -293,6 +304,7 @@ function App() {
                 midiInputs.map((device) => (
                   <option key={device.id} value={device.id}>
                     {device.name}
+                    {device.availableForLive ? "" : " (MIDI Services)"}
                   </option>
                 ))
               )}
@@ -308,6 +320,7 @@ function App() {
             <label className="switch">
               <input
                 checked={liveEnabled}
+                disabled={!!selectedMidiInput && !selectedMidiInput.availableForLive}
                 onChange={(event) => void handleLiveToggle(event.target.checked)}
                 type="checkbox"
               />
@@ -331,6 +344,9 @@ function App() {
           <span>{openedFile}</span>
           <span>{summary.enabledRules} enabled rules</span>
           <span>{summary.triggerModes.map(triggerModeLabel).join(", ")}</span>
+          {selectedMidiInput && !selectedMidiInput.availableForLive ? (
+            <span>{selectedMidiInput.note ?? t("midiServicesDetected")}</span>
+          ) : null}
         </section>
 
         <section className="content-grid">

@@ -58,6 +58,9 @@ export interface Preset {
 export interface MidiInputDevice {
   id: number;
   name: string;
+  source: "winMm" | "windowsMidiServices";
+  availableForLive: boolean;
+  note: string | null;
 }
 
 export interface MidiEvent {

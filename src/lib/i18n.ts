@@ -52,6 +52,8 @@ export const translations = {
     midiDevicesFound: "MIDI devices found",
     midiDevicesNotFound: "No MIDI input devices found. Start loopMIDI, create a port, then refresh.",
     midiDevicesRefreshFailed: "MIDI device refresh failed",
+    midiServicesDetected:
+      "Detected, but this device uses Windows MIDI Services. Live input for this driver path is not enabled yet.",
     openMidiFailed: "Open MIDI failed",
     parsedMidiEvents: "Parsed MIDI note events",
   },
@@ -102,6 +104,8 @@ export const translations = {
     midiDevicesFound: "已发现 MIDI 设备",
     midiDevicesNotFound: "未发现 MIDI 输入设备。请启动 loopMIDI、创建端口，然后刷新。",
     midiDevicesRefreshFailed: "刷新 MIDI 设备失败",
+    midiServicesDetected:
+      "已识别，但此设备走 Windows MIDI Services/MIDI 2.0 通道；实时输入支持还没接入这条驱动路径。",
     openMidiFailed: "打开 MIDI 失败",
     parsedMidiEvents: "已解析 MIDI 音符事件",
   },
