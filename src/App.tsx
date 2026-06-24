@@ -30,6 +30,8 @@ function App() {
   const [midiInputs, setMidiInputs] = useState<MidiInputDevice[]>([]);
   const [selectedInputId, setSelectedInputId] = useState("");
   const [outputEnabled, setOutputEnabled] = useState(false);
+  const [liveEnabled, setLiveEnabled] = useState(false);
+  const [openedPath, setOpenedPath] = useState("");
   const [openedFile, setOpenedFile] = useState<string>("No MIDI file selected");
   const [logs, setLogs] = useState<string[]>([
     "Ready. Open a MIDI file or select a live input device.",
@@ -79,6 +81,7 @@ function App() {
         return;
       }
 
+      setOpenedPath(selected);
       setOpenedFile(fileName(selected));
       const events = await invoke<MidiEvent[]>("parse_midi_file", {
         path: selected,
@@ -86,6 +89,54 @@ function App() {
       pushLog(`Parsed ${events.length} MIDI note events from ${fileName(selected)}.`);
     } catch (error) {
       pushLog(`Open MIDI failed: ${readableError(error)}`);
+    }
+  }
+
+  async function handlePlay() {
+    if (!openedPath) {
+      pushLog("Open a MIDI file before playback.");
+      return;
+    }
+
+    try {
+      const actionCount = await invoke<number>("play_midi_file", {
+        path: openedPath,
+      });
+      pushLog(`Playback started with ${actionCount} scheduled key actions.`);
+    } catch (error) {
+      pushLog(`Playback failed: ${readableError(error)}`);
+    }
+  }
+
+  async function handleStop() {
+    try {
+      await invoke("stop_playback");
+      pushLog("Playback stopped and held keys released.");
+    } catch (error) {
+      pushLog(`Stop failed: ${readableError(error)}`);
+    }
+  }
+
+  async function handleLiveToggle(next: boolean) {
+    if (next && selectedInputId === "") {
+      pushLog("Select a MIDI input device before enabling live input.");
+      return;
+    }
+
+    setLiveEnabled(next);
+    try {
+      if (next) {
+        await invoke("start_live_input", {
+          deviceId: Number(selectedInputId),
+        });
+        pushLog("Live MIDI input enabled.");
+      } else {
+        await invoke("stop_live_input");
+        pushLog("Live MIDI input disabled and held keys released.");
+      }
+    } catch (error) {
+      setLiveEnabled(false);
+      pushLog(`Live input failed: ${readableError(error)}`);
     }
   }
 
@@ -165,13 +216,13 @@ function App() {
               <FolderOpen size={16} />
               <span>Open MIDI</span>
             </button>
-            <button className="icon-command" title="Play" type="button">
+            <button className="icon-command" onClick={handlePlay} title="Play" type="button">
               <Play size={16} />
             </button>
-            <button className="icon-command" title="Pause" type="button">
+            <button className="icon-command" disabled title="Pause" type="button">
               <Pause size={16} />
             </button>
-            <button className="icon-command" title="Stop" type="button">
+            <button className="icon-command" onClick={handleStop} title="Stop" type="button">
               <Square size={16} />
             </button>
           </div>
@@ -209,7 +260,11 @@ function App() {
               )}
             </select>
             <label className="switch">
-              <input type="checkbox" />
+              <input
+                checked={liveEnabled}
+                onChange={(event) => void handleLiveToggle(event.target.checked)}
+                type="checkbox"
+              />
               <span>Live</span>
             </label>
           </div>

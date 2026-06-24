@@ -35,6 +35,11 @@ button:hover {
   background: #f7fbf8;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 260px minmax(700px, 1fr);

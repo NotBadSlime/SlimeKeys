@@ -7,8 +7,8 @@ pub mod presets;
 pub mod rule_engine;
 
 use commands::{
-    get_app_snapshot, list_midi_inputs, panic_release_all_keys, parse_midi_file,
-    set_output_enabled, AppState,
+    get_app_snapshot, list_midi_inputs, panic_release_all_keys, parse_midi_file, play_midi_file,
+    set_output_enabled, start_live_input, stop_live_input, stop_playback, AppState,
 };
 
 #[tauri::command]
@@ -25,8 +25,12 @@ pub fn run() {
             get_app_snapshot,
             list_midi_inputs,
             parse_midi_file,
+            play_midi_file,
+            stop_playback,
             set_output_enabled,
-            panic_release_all_keys
+            panic_release_all_keys,
+            start_live_input,
+            stop_live_input
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SlimeKeys");
