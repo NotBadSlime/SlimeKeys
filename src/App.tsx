@@ -41,6 +41,7 @@ import {
   DEFAULT_HOTKEYS,
   mergeSavedHotkeys,
   normalizeAccelerator,
+  shouldHandleShortcutEvent,
   validateHotkeyBindings,
 } from "./lib/hotkeys";
 import {
@@ -199,7 +200,7 @@ function App() {
     let disposed = false;
 
     const registration = register(shortcuts, (event) => {
-      if (event.state !== "Pressed") {
+      if (!shouldHandleShortcutEvent(event.state)) {
         return;
       }
 
@@ -207,7 +208,7 @@ function App() {
         normalizeAccelerator(event.shortcut).toLowerCase(),
       );
       if (action) {
-        hotkeyHandlersRef.current[action]();
+        window.setTimeout(() => hotkeyHandlersRef.current[action](), 80);
       }
     })
       .then(() => {
@@ -766,16 +767,25 @@ function App() {
           </div>
         </header>
 
-        <section className="status-line">
+        <section className={`status-line ${playbackActive ? "playing" : ""}`}>
           <span>{openedFile}</span>
           <span>{summary.enabledRules} enabled rules</span>
           <span>{summary.triggerModes.map(triggerModeLabel).join(", ")}</span>
+          {playbackActive ? (
+            <span className="playback-status">
+              <span className="playback-status-dot" />
+              {t("playingNow")}
+            </span>
+          ) : null}
           {selectedMidiInput && !selectedMidiInput.availableForLive ? (
             <span>{selectedMidiInput.note ?? t("midiServicesDetected")}</span>
           ) : null}
         </section>
 
-        <section className="playback-progress" aria-label={t("songProgress")}>
+        <section
+          className={`playback-progress ${playbackActive ? "active" : ""}`}
+          aria-label={t("songProgress")}
+        >
           <span>{formatPlaybackTime(displayedPlaybackMs)}</span>
           <input
             aria-label={t("songProgress")}

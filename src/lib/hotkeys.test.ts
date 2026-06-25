@@ -5,6 +5,7 @@ import {
   HOTKEY_ACTIONS,
   mergeSavedHotkeys,
   normalizeAccelerator,
+  shouldHandleShortcutEvent,
   validateHotkeyBindings,
 } from "./hotkeys";
 
@@ -27,6 +28,11 @@ describe("hotkey helpers", () => {
     expect(normalizeAccelerator("ctrl + alt + right")).toBe("Ctrl+Alt+Right");
     expect(normalizeAccelerator("Control+Option+Backspace")).toBe(
       "Ctrl+Alt+Backspace",
+    );
+    expect(normalizeAccelerator("Control+Alt+KeyP")).toBe("Ctrl+Alt+P");
+    expect(normalizeAccelerator("Control+Alt+Digit1")).toBe("Ctrl+Alt+1");
+    expect(normalizeAccelerator("control+alt+ArrowRight")).toBe(
+      "Ctrl+Alt+Right",
     );
   });
 
@@ -76,5 +82,10 @@ describe("hotkey helpers", () => {
     } as KeyboardEvent;
 
     expect(acceleratorFromKeyboardEvent(event)).toBe("Ctrl+Alt+Right");
+  });
+
+  it("runs global hotkey actions after the shortcut key is released", () => {
+    expect(shouldHandleShortcutEvent("Pressed")).toBe(false);
+    expect(shouldHandleShortcutEvent("Released")).toBe(true);
   });
 });

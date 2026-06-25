@@ -32,4 +32,10 @@ describe("createTranslator", () => {
 
     expect(t("outputDisabledPlaybackWarning")).toContain("不会发送按键");
   });
+
+  it("labels active playback", () => {
+    const t = createTranslator("zh");
+
+    expect(t("playingNow")).toBe("正在播放");
+  });
 });

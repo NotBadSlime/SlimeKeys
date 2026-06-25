@@ -78,6 +78,10 @@ export function validateHotkeyBindings(
   return { ok: true };
 }
 
+export function shouldHandleShortcutEvent(state: string): boolean {
+  return state === "Released";
+}
+
 export function mergeSavedHotkeys(saved: unknown): HotkeyBinding[] {
   if (!Array.isArray(saved)) {
     return cloneDefaults();
@@ -141,13 +145,32 @@ function normalizeAcceleratorPart(part: string): string {
     right: "Right",
     up: "Up",
     down: "Down",
+    arrowleft: "Left",
+    arrowright: "Right",
+    arrowup: "Up",
+    arrowdown: "Down",
     backspace: "Backspace",
     space: "Space",
     esc: "Esc",
     escape: "Esc",
+    super: "Command",
   };
 
-  return aliases[lower] ?? normalizeKeyName(part);
+  if (aliases[lower]) {
+    return aliases[lower];
+  }
+
+  const keyCode = /^key([a-z])$/i.exec(part);
+  if (keyCode) {
+    return keyCode[1].toUpperCase();
+  }
+
+  const digitCode = /^digit([0-9])$/i.exec(part);
+  if (digitCode) {
+    return digitCode[1];
+  }
+
+  return normalizeKeyName(part);
 }
 
 function normalizeEventKey(key: string): string {
