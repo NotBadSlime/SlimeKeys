@@ -50,6 +50,11 @@ import {
   summarizePreset,
   triggerModeLabel,
 } from "./lib/presets";
+import {
+  clampPlaybackMs,
+  formatPlaybackTime,
+  midiDurationMs,
+} from "./lib/playbackProgress";
 import { selectRelativeSong, songEntryFromPath } from "./lib/songQueue";
 
 const HOTKEY_STORAGE_KEY = "slimekeys.hotkeys.v1";
@@ -68,6 +73,10 @@ function App() {
   const [liveEnabled, setLiveEnabled] = useState(false);
   const [openedPath, setOpenedPath] = useState("");
   const [openedFile, setOpenedFile] = useState<string>("");
+  const [midiEvents, setMidiEvents] = useState<MidiEvent[]>([]);
+  const [playbackPositionMs, setPlaybackPositionMs] = useState(0);
+  const [pendingSeekMs, setPendingSeekMs] = useState<number | null>(null);
+  const [playbackActive, setPlaybackActive] = useState(false);
   const [playlist, setPlaylist] = useState<SongEntry[]>([]);
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
   const [hotkeys, setHotkeys] = useState<HotkeyBinding[]>(() =>
@@ -84,6 +93,10 @@ function App() {
     previous: () => undefined,
     releaseAll: () => undefined,
   });
+  const progressTimerRef = useRef<number | null>(null);
+  const progressStartedAtRef = useRef(0);
+  const progressOffsetMsRef = useRef(0);
+  const pendingSeekMsRef = useRef<number | null>(null);
   const t = useMemo(() => createTranslator(language), [language]);
 
   useEffect(() => {
@@ -105,13 +118,15 @@ function App() {
 
   useEffect(() => {
     hotkeyHandlersRef.current = {
-      play: () => void playSong(currentSong),
+      play: () => void handlePlay(),
       stop: () => void stopPlayback(true),
       next: () => void moveSong(1),
       previous: () => void moveSong(-1),
       releaseAll: () => void handleReleaseAll(),
     };
   });
+
+  useEffect(() => () => clearProgressTimer(), []);
 
   useEffect(() => {
     if (!recordingAction) {
@@ -221,6 +236,8 @@ function App() {
   const currentSong =
     playlist[currentSongIndex] ??
     (openedPath ? songEntryFromPath(openedPath) : null);
+  const songDurationMs = useMemo(() => midiDurationMs(midiEvents), [midiEvents]);
+  const displayedPlaybackMs = pendingSeekMs ?? playbackPositionMs;
   const summary = useMemo(
     () => summarizePreset(selectedPreset),
     [selectedPreset],
@@ -295,29 +312,41 @@ function App() {
   }
 
   async function handlePlay() {
-    await playSong(currentSong);
+    const startAtMs =
+      playbackPositionMs > 0 && playbackPositionMs < songDurationMs
+        ? playbackPositionMs
+        : 0;
+    await playSong(currentSong, startAtMs);
   }
 
-  async function playSong(song: SongEntry | null) {
+  async function playSong(song: SongEntry | null, startAtMs = 0) {
     if (!song) {
       pushLog(t("openBeforePlayback"));
       return;
     }
 
     try {
+      let events = midiEvents;
       if (song.path !== openedPath) {
-        await loadSong(song, false);
+        events = await loadSong(song, false);
       }
-      await startPlayback(song);
+      await startPlayback(song, startAtMs, midiDurationMs(events));
     } catch (error) {
       pushLog(`${t("playbackFailed")}: ${readableError(error)}`);
     }
   }
 
-  async function startPlayback(song: SongEntry) {
-    const actionCount = await invoke<number>("play_midi_file", {
+  async function startPlayback(
+    song: SongEntry,
+    startAtMs = 0,
+    durationMs = songDurationMs,
+  ) {
+    const seekMs = clampPlaybackMs(startAtMs, durationMs);
+    const actionCount = await invoke<number>("play_midi_file_from", {
       path: song.path,
+      startAtMs: seekMs,
     });
+    beginProgress(seekMs, durationMs);
     pushLog(`${t("playbackStarted")}: ${actionCount}`);
   }
 
@@ -328,6 +357,7 @@ function App() {
   async function stopPlayback(log: boolean) {
     try {
       await invoke("stop_playback");
+      stopProgress(true);
       if (log) {
         pushLog(t("playbackStopped"));
       }
@@ -336,15 +366,22 @@ function App() {
     }
   }
 
-  async function loadSong(song: SongEntry, logParsed: boolean) {
+  async function loadSong(song: SongEntry, logParsed: boolean): Promise<MidiEvent[]> {
     setOpenedPath(song.path);
     setOpenedFile(song.name);
+    clearProgressTimer();
+    setPlaybackActive(false);
+    setPlaybackPositionMs(0);
+    pendingSeekMsRef.current = null;
+    setPendingSeekMs(null);
     const events = await invoke<MidiEvent[]>("parse_midi_file", {
       path: song.path,
     });
+    setMidiEvents(events);
     if (logParsed) {
       pushLog(`${t("parsedMidiEvents")}: ${events.length} (${song.name})`);
     }
+    return events;
   }
 
   async function moveSong(direction: 1 | -1) {
@@ -390,10 +427,82 @@ function App() {
         setPlaylist([selectedSong]);
         setCurrentSongIndex(0);
       }
-      await loadSong(selectedSong, false);
-      await startPlayback(selectedSong);
+      const events = await loadSong(selectedSong, false);
+      await startPlayback(selectedSong, 0, midiDurationMs(events));
     } catch (error) {
       pushLog(`${t("playbackFailed")}: ${readableError(error)}`);
+    }
+  }
+
+  function handleSeekInput(value: string) {
+    const seekMs = clampPlaybackMs(Number(value), songDurationMs);
+    pendingSeekMsRef.current = seekMs;
+    setPendingSeekMs(seekMs);
+  }
+
+  async function commitSeek() {
+    const pendingSeek = pendingSeekMsRef.current ?? pendingSeekMs;
+    if (pendingSeek === null) {
+      return;
+    }
+
+    const seekMs = clampPlaybackMs(pendingSeek, songDurationMs);
+    pendingSeekMsRef.current = null;
+    setPendingSeekMs(null);
+    setPlaybackPositionMs(seekMs);
+    if (!playbackActive || !currentSong) {
+      return;
+    }
+
+    try {
+      await startPlayback(currentSong, seekMs);
+    } catch (error) {
+      stopProgress(false);
+      pushLog(`${t("playbackFailed")}: ${readableError(error)}`);
+    }
+  }
+
+  function beginProgress(startAtMs: number, durationMs: number) {
+    clearProgressTimer();
+    const clampedStart = clampPlaybackMs(startAtMs, durationMs);
+    progressStartedAtRef.current = performance.now();
+    progressOffsetMsRef.current = clampedStart;
+    setPlaybackPositionMs(clampedStart);
+
+    if (durationMs <= 0 || clampedStart >= durationMs) {
+      setPlaybackActive(false);
+      return;
+    }
+
+    setPlaybackActive(true);
+    progressTimerRef.current = window.setInterval(() => {
+      const elapsedMs = performance.now() - progressStartedAtRef.current;
+      const nextPosition = clampPlaybackMs(
+        progressOffsetMsRef.current + elapsedMs,
+        durationMs,
+      );
+      setPlaybackPositionMs(nextPosition);
+      if (nextPosition >= durationMs) {
+        clearProgressTimer();
+        setPlaybackActive(false);
+      }
+    }, 100);
+  }
+
+  function stopProgress(resetPosition: boolean) {
+    clearProgressTimer();
+    setPlaybackActive(false);
+    pendingSeekMsRef.current = null;
+    setPendingSeekMs(null);
+    if (resetPosition) {
+      setPlaybackPositionMs(0);
+    }
+  }
+
+  function clearProgressTimer() {
+    if (progressTimerRef.current !== null) {
+      window.clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
     }
   }
 
@@ -626,6 +735,36 @@ function App() {
           {selectedMidiInput && !selectedMidiInput.availableForLive ? (
             <span>{selectedMidiInput.note ?? t("midiServicesDetected")}</span>
           ) : null}
+        </section>
+
+        <section className="playback-progress" aria-label={t("songProgress")}>
+          <span>{formatPlaybackTime(displayedPlaybackMs)}</span>
+          <input
+            aria-label={t("songProgress")}
+            disabled={!openedPath || songDurationMs === 0}
+            max={Math.max(songDurationMs, 0)}
+            min={0}
+            onChange={(event) => handleSeekInput(event.target.value)}
+            onKeyUp={(event) => {
+              if (
+                [
+                  "ArrowLeft",
+                  "ArrowRight",
+                  "Home",
+                  "End",
+                  "PageUp",
+                  "PageDown",
+                ].includes(event.key)
+              ) {
+                void commitSeek();
+              }
+            }}
+            onPointerUp={() => void commitSeek()}
+            step={100}
+            type="range"
+            value={clampPlaybackMs(displayedPlaybackMs, songDurationMs)}
+          />
+          <span>{formatPlaybackTime(songDurationMs)}</span>
         </section>
 
         <section className="content-grid">

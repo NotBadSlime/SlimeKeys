@@ -78,6 +78,23 @@ pub fn build_actions_for_events(preset: &Preset, events: &[MidiEvent]) -> Vec<Ke
     build_actions_for_events_with_state(preset, events, &mut trigger_state)
 }
 
+pub fn build_actions_for_events_from(
+    preset: &Preset,
+    events: &[MidiEvent],
+    start_at_ms: u64,
+) -> Vec<KeyAction> {
+    build_actions_for_events(preset, events)
+        .into_iter()
+        .filter_map(|mut action| {
+            if action.at_ms < start_at_ms {
+                return None;
+            }
+            action.at_ms -= start_at_ms;
+            Some(action)
+        })
+        .collect()
+}
+
 fn build_actions_for_events_with_state(
     preset: &Preset,
     events: &[MidiEvent],
@@ -139,11 +156,21 @@ pub fn list_midi_files_near(path: String) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub fn play_midi_file(path: String, state: State<'_, AppState>) -> Result<usize, String> {
+    play_midi_file_from(path, 0, state)
+}
+
+#[tauri::command]
+pub fn play_midi_file_from(
+    path: String,
+    start_at_ms: u64,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
     stop_existing_playback(&state)?;
+    release_all(&state)?;
 
     let bytes = fs::read(&path).map_err(|err| format!("failed to read MIDI file: {err}"))?;
     let events = parse_midi_bytes(&bytes).map_err(|err| err.to_string())?;
-    let actions = build_actions_for_events(&genshin_21_key_preset(), &events);
+    let actions = build_actions_for_events_from(&genshin_21_key_preset(), &events, start_at_ms);
     let action_count = actions.len();
     let cancel = Arc::new(AtomicBool::new(false));
 
@@ -410,6 +437,25 @@ mod tests {
         assert_eq!(actions[0].kind, crate::model::KeyActionKind::Down);
         assert_eq!(actions[0].at_ms, 100);
         assert_eq!(actions[1].key, "Z");
+        assert_eq!(actions[1].kind, crate::model::KeyActionKind::Up);
+        assert_eq!(actions[1].at_ms, 135);
+    }
+
+    #[test]
+    fn builds_keyboard_actions_from_seek_offset_relative_to_seek_start() {
+        let preset = genshin_21_key_preset();
+        let events = vec![
+            MidiEvent::note_on(crate::model::InputSource::File, Some(0), 1, 48, 90, 100),
+            MidiEvent::note_on(crate::model::InputSource::File, Some(0), 1, 50, 90, 300),
+        ];
+
+        let actions = build_actions_for_events_from(&preset, &events, 200);
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].key, "X");
+        assert_eq!(actions[0].kind, crate::model::KeyActionKind::Down);
+        assert_eq!(actions[0].at_ms, 100);
+        assert_eq!(actions[1].key, "X");
         assert_eq!(actions[1].kind, crate::model::KeyActionKind::Up);
         assert_eq!(actions[1].at_ms, 135);
     }

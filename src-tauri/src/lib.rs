@@ -8,8 +8,8 @@ pub mod rule_engine;
 
 use commands::{
     get_app_snapshot, list_midi_files_near, list_midi_inputs, panic_release_all_keys,
-    parse_midi_file, play_midi_file, set_output_enabled, start_live_input, stop_live_input,
-    stop_playback, AppState,
+    parse_midi_file, play_midi_file, play_midi_file_from, set_output_enabled, start_live_input,
+    stop_live_input, stop_playback, AppState,
 };
 
 #[tauri::command]
@@ -29,6 +29,7 @@ pub fn run() {
             list_midi_files_near,
             parse_midi_file,
             play_midi_file,
+            play_midi_file_from,
             stop_playback,
             set_output_enabled,
             panic_release_all_keys,

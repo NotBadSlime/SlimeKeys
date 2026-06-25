@@ -121,26 +121,13 @@ fn key_to_virtual_key(key: &str) -> KeyboardResult<u16> {
 #[cfg(windows)]
 fn send_windows_key(key: &str, key_up: bool) -> KeyboardResult<()> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-        VIRTUAL_KEY,
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
     };
 
-    let vk = key_to_virtual_key(key)?;
-    let flags = if key_up {
-        KEYEVENTF_KEYUP
-    } else {
-        KEYBD_EVENT_FLAGS(0)
-    };
     let input = INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VIRTUAL_KEY(vk),
-                wScan: 0,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
-            },
+            ki: windows_keyboard_input(key, key_up)?,
         },
     };
     let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
@@ -150,6 +137,35 @@ fn send_windows_key(key: &str, key_up: bool) -> KeyboardResult<()> {
     } else {
         Err(KeyboardOutputError::SendFailed(key.to_string()))
     }
+}
+
+#[cfg(windows)]
+fn windows_keyboard_input(
+    key: &str,
+    key_up: bool,
+) -> KeyboardResult<windows::Win32::UI::Input::KeyboardAndMouse::KEYBDINPUT> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        MapVirtualKeyW, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
+        MAPVK_VK_TO_VSC, VIRTUAL_KEY,
+    };
+
+    let vk = key_to_virtual_key(key)?;
+    let scan_code = unsafe { MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) as u16 };
+    if scan_code == 0 {
+        return Err(KeyboardOutputError::UnknownKey(key.to_string()));
+    }
+    let mut flags = KEYBD_EVENT_FLAGS(KEYEVENTF_SCANCODE.0);
+    if key_up {
+        flags = KEYBD_EVENT_FLAGS(flags.0 | KEYEVENTF_KEYUP.0);
+    }
+
+    Ok(KEYBDINPUT {
+        wVk: VIRTUAL_KEY(0),
+        wScan: scan_code,
+        dwFlags: flags,
+        time: 0,
+        dwExtraInfo: 0,
+    })
 }
 
 #[cfg(test)]
@@ -208,5 +224,22 @@ mod tests {
 
         assert!(err.to_string().contains("unknown key"));
         assert!(output.sink().events().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_keyboard_input_uses_scan_codes_for_game_compatibility() {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            KEYEVENTF_SCANCODE, VIRTUAL_KEY,
+        };
+
+        let input = windows_keyboard_input("Z", false).unwrap();
+
+        assert_eq!(input.wVk, VIRTUAL_KEY(0));
+        assert_ne!(input.wScan, 0);
+        assert_eq!(
+            input.dwFlags.0 & KEYEVENTF_SCANCODE.0,
+            KEYEVENTF_SCANCODE.0
+        );
     }
 }

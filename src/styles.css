@@ -160,6 +160,28 @@ button:disabled {
   white-space: nowrap;
 }
 
+.playback-progress {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #dbe3dd;
+  background: #ffffff;
+  padding: 8px 16px;
+  color: #526158;
+  font-size: 12px;
+}
+
+.playback-progress input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: #2f7f5f;
+}
+
+.playback-progress span:last-child {
+  text-align: right;
+}
+
 .command {
   display: inline-flex;
   min-height: 34px;
