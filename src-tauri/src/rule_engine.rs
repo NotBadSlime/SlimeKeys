@@ -9,6 +9,7 @@ use crate::model::{
 pub struct TriggerState {
     held_keys: BTreeSet<String>,
     chop_starts: BTreeMap<String, u64>,
+    retrigger_release_at: BTreeMap<String, u64>,
 }
 
 impl TriggerState {
@@ -34,6 +35,24 @@ impl TriggerState {
 
     fn take_chop_start(&mut self, key: &str) -> Option<u64> {
         self.chop_starts.remove(key)
+    }
+
+    fn retrigger_release_at(&self, key: &str) -> Option<u64> {
+        self.retrigger_release_at.get(key).copied()
+    }
+
+    fn schedule_retrigger_release(&mut self, key: &str, at_ms: u64) {
+        self.retrigger_release_at.insert(key.to_string(), at_ms);
+    }
+
+    fn expire_retrigger_release(&mut self, key: &str, at_ms: u64) {
+        if self
+            .retrigger_release_at(key)
+            .is_some_and(|release_at| release_at <= at_ms)
+        {
+            self.retrigger_release_at.remove(key);
+            self.mark_up(key);
+        }
     }
 }
 
@@ -190,21 +209,34 @@ fn retrigger_actions(rule: &Rule, event: &MidiEvent, state: &mut TriggerState) -
         MidiEventType::NoteOn => {
             let mut actions = Vec::new();
             for key in &rule.output.keys {
-                if state.is_down(key) {
+                state.expire_retrigger_release(key, base);
+                let previous_release_at = state.retrigger_release_at(key);
+                let press_at = if state.is_down(key) {
+                    let press_at =
+                        (base + rule.retrigger_gap_ms).max(previous_release_at.unwrap_or(base));
                     actions.push(key_action(key, KeyActionKind::Up, base));
-                    actions.push(key_action(
-                        key,
-                        KeyActionKind::Down,
-                        base + rule.retrigger_gap_ms,
-                    ));
+                    press_at
                 } else {
-                    actions.push(key_action(key, KeyActionKind::Down, base));
+                    base
+                };
+
+                let release_at = press_at + rule.press_duration_ms;
+                actions.push(key_action(key, KeyActionKind::Down, press_at));
+                actions.push(key_action(key, KeyActionKind::Up, release_at));
+                if state.is_down(key) {
+                    state.mark_up(key);
                 }
                 state.mark_down(key);
+                state.schedule_retrigger_release(key, release_at);
             }
             actions
         }
-        MidiEventType::NoteOff => hold_actions(rule, event, state),
+        MidiEventType::NoteOff => {
+            for key in &rule.output.keys {
+                state.expire_retrigger_release(key, base);
+            }
+            Vec::new()
+        }
         MidiEventType::Both => Vec::new(),
     }
 }
@@ -274,9 +306,40 @@ mod tests {
 
         assert_eq!(
             actions.iter().map(|action| action.kind).collect::<Vec<_>>(),
-            vec![KeyActionKind::Up, KeyActionKind::Down]
+            vec![KeyActionKind::Up, KeyActionKind::Down, KeyActionKind::Up]
         );
         assert_eq!(actions[1].at_ms, 212);
+        assert_eq!(actions[2].at_ms, 247);
+    }
+
+    #[test]
+    fn retrigger_turns_overlapping_repeated_notes_into_short_taps() {
+        let mut state = TriggerState::default();
+        let mut rule = test_rule(NoteFilter::Single { value: 60 }, TriggerMode::Retrigger);
+        rule.event_type = MidiEventType::Both;
+        rule.press_duration_ms = 6;
+        rule.retrigger_gap_ms = 6;
+        let first_on = MidiEvent::note_on(InputSource::File, Some(0), 1, 60, 90, 100);
+        let second_on = MidiEvent::note_on(InputSource::File, Some(0), 1, 60, 90, 110);
+        let late_off = MidiEvent::note_off(InputSource::File, Some(0), 1, 60, 0, 300);
+
+        let mut actions = actions_for_rule(&rule, &first_on, &mut state);
+        actions.extend(actions_for_rule(&rule, &second_on, &mut state));
+        actions.extend(actions_for_rule(&rule, &late_off, &mut state));
+
+        assert_eq!(
+            actions
+                .iter()
+                .map(|action| (action.kind, action.at_ms))
+                .collect::<Vec<_>>(),
+            vec![
+                (KeyActionKind::Down, 100),
+                (KeyActionKind::Up, 106),
+                (KeyActionKind::Down, 110),
+                (KeyActionKind::Up, 116),
+            ]
+        );
+        assert!(!state.is_down("A"));
     }
 
     #[test]

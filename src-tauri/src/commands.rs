@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(actions[0].at_ms, 100);
         assert_eq!(actions[1].key, "Z");
         assert_eq!(actions[1].kind, crate::model::KeyActionKind::Up);
-        assert_eq!(actions[1].at_ms, 180);
+        assert_eq!(actions[1].at_ms, 135);
     }
 
     #[test]
@@ -502,7 +502,7 @@ mod tests {
         assert_eq!(actions[0].at_ms, 100);
         assert_eq!(actions[1].key, "X");
         assert_eq!(actions[1].kind, crate::model::KeyActionKind::Up);
-        assert_eq!(actions[1].at_ms, 190);
+        assert_eq!(actions[1].at_ms, 135);
     }
 
     #[test]
@@ -577,8 +577,8 @@ mod tests {
 
     fn simple_midi_bytes() -> Vec<u8> {
         vec![
-            b'M', b'T', b'h', b'd', 0, 0, 0, 6, 0, 0, 0, 1, 0, 96, b'M', b'T', b'r', b'k', 0, 0,
-            0, 12, 0, 0x90, 60, 64, 96, 0x80, 60, 0, 0, 0xff, 0x2f, 0,
+            b'M', b'T', b'h', b'd', 0, 0, 0, 6, 0, 0, 0, 1, 0, 96, b'M', b'T', b'r', b'k', 0, 0, 0,
+            12, 0, 0x90, 60, 64, 96, 0x80, 60, 0, 0, 0xff, 0x2f, 0,
         ]
     }
 }
