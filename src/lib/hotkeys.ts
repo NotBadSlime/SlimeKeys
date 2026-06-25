@@ -84,10 +84,6 @@ export function captureHotkeyFromKeyboardEvent(
     return { kind: "pending" };
   }
 
-  if (!hasModifier) {
-    return { kind: "invalid" };
-  }
-
   const accelerator = acceleratorFromKeyboardEvent(event);
   return accelerator ? { kind: "record", accelerator } : { kind: "pending" };
 }

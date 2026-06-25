@@ -97,7 +97,7 @@ describe("hotkey helpers", () => {
     ).toEqual({ kind: "pending" });
   });
 
-  it("captures only modifier-based shortcut combinations", () => {
+  it("captures single keys and modifier-based shortcut combinations", () => {
     expect(
       captureHotkeyFromKeyboardEvent({
         ctrlKey: false,
@@ -106,7 +106,7 @@ describe("hotkey helpers", () => {
         metaKey: false,
         key: "P",
       } as KeyboardEvent),
-    ).toEqual({ kind: "invalid" });
+    ).toEqual({ kind: "record", accelerator: "P" });
 
     expect(
       captureHotkeyFromKeyboardEvent({

@@ -10,7 +10,8 @@ pub struct TriggerState {
     held_keys: BTreeSet<String>,
     chop_starts: BTreeMap<String, u64>,
     hold_counts: BTreeMap<String, u16>,
-    retrigger_release_at: BTreeMap<String, u64>,
+    retrigger_counts: BTreeMap<String, u16>,
+    retrigger_last_release_at: BTreeMap<String, u64>,
 }
 
 impl TriggerState {
@@ -64,22 +65,54 @@ impl TriggerState {
         }
     }
 
-    fn retrigger_release_at(&self, key: &str) -> Option<u64> {
-        self.retrigger_release_at.get(key).copied()
-    }
+    fn retrigger_note_on(&mut self, key: &str, at_ms: u64, gap_ms: u64) -> Vec<KeyAction> {
+        let was_down = self.is_down(key);
+        let released_at_same_time = self
+            .retrigger_last_release_at
+            .get(key)
+            .is_some_and(|released_at| *released_at == at_ms);
+        let press_at = if was_down || released_at_same_time {
+            at_ms + gap_ms
+        } else {
+            at_ms
+        };
+        let mut actions = Vec::new();
 
-    fn schedule_retrigger_release(&mut self, key: &str, at_ms: u64) {
-        self.retrigger_release_at.insert(key.to_string(), at_ms);
-    }
-
-    fn expire_retrigger_release(&mut self, key: &str, at_ms: u64) {
-        if self
-            .retrigger_release_at(key)
-            .is_some_and(|release_at| release_at <= at_ms)
-        {
-            self.retrigger_release_at.remove(key);
-            self.mark_up(key);
+        if was_down {
+            actions.push(key_action(key, KeyActionKind::Up, at_ms));
+            self.retrigger_last_release_at
+                .insert(key.to_string(), at_ms);
         }
+
+        let count = self.retrigger_counts.entry(key.to_string()).or_default();
+        *count = count.saturating_add(1);
+        self.mark_down(key);
+        actions.push(key_action(key, KeyActionKind::Down, press_at));
+        actions
+    }
+
+    fn retrigger_note_off(&mut self, key: &str, at_ms: u64) -> Option<KeyAction> {
+        if let Some(count) = self.retrigger_counts.get_mut(key) {
+            if *count > 1 {
+                *count -= 1;
+                return None;
+            }
+
+            self.retrigger_counts.remove(key);
+            self.mark_up(key);
+            self.retrigger_last_release_at
+                .insert(key.to_string(), at_ms);
+            return Some(key_action(key, KeyActionKind::Up, at_ms));
+        }
+
+        if self.is_down(key) {
+            self.mark_up(key);
+            self.retrigger_last_release_at
+                .insert(key.to_string(), at_ms);
+            return Some(key_action(key, KeyActionKind::Up, at_ms));
+        }
+
+        None
     }
 }
 
@@ -233,37 +266,26 @@ fn retrigger_actions(rule: &Rule, event: &MidiEvent, state: &mut TriggerState) -
     match event.event_type {
         MidiEventType::NoteOn => {
             let mut actions = Vec::new();
+            let gap = retrigger_gap_ms(rule);
             for key in &rule.output.keys {
-                state.expire_retrigger_release(key, base);
-                let previous_release_at = state.retrigger_release_at(key);
-                let press_at = if state.is_down(key) {
-                    let press_at =
-                        (base + rule.retrigger_gap_ms).max(previous_release_at.unwrap_or(base));
-                    actions.push(key_action(key, KeyActionKind::Up, base));
-                    press_at
-                } else {
-                    base
-                };
-
-                let release_at = press_at + rule.press_duration_ms;
-                actions.push(key_action(key, KeyActionKind::Down, press_at));
-                actions.push(key_action(key, KeyActionKind::Up, release_at));
-                if state.is_down(key) {
-                    state.mark_up(key);
-                }
-                state.mark_down(key);
-                state.schedule_retrigger_release(key, release_at);
+                actions.extend(state.retrigger_note_on(key, base, gap));
             }
             actions
         }
-        MidiEventType::NoteOff => {
-            for key in &rule.output.keys {
-                state.expire_retrigger_release(key, base);
-            }
-            Vec::new()
-        }
+        MidiEventType::NoteOff => rule
+            .output
+            .keys
+            .iter()
+            .filter_map(|key| state.retrigger_note_off(key, base))
+            .collect(),
         MidiEventType::Both => Vec::new(),
     }
+}
+
+fn retrigger_gap_ms(rule: &Rule) -> u64 {
+    rule.retrigger_gap_ms
+        .max(1)
+        .min(rule.press_duration_ms.max(1))
 }
 
 fn key_action(key: &str, kind: KeyActionKind, at_ms: u64) -> KeyAction {
@@ -350,33 +372,56 @@ mod tests {
     fn retrigger_releases_before_repressing_held_key() {
         let mut state = TriggerState::default();
         state.mark_down("A");
-        let rule = test_rule(NoteFilter::Single { value: 60 }, TriggerMode::Retrigger);
+        let mut rule = test_rule(NoteFilter::Single { value: 60 }, TriggerMode::Retrigger);
+        rule.event_type = MidiEventType::Both;
         let event = MidiEvent::note_on(InputSource::Live, None, 1, 60, 90, 200);
 
         let actions = actions_for_rule(&rule, &event, &mut state);
 
         assert_eq!(
             actions.iter().map(|action| action.kind).collect::<Vec<_>>(),
-            vec![KeyActionKind::Up, KeyActionKind::Down, KeyActionKind::Up]
+            vec![KeyActionKind::Up, KeyActionKind::Down]
         );
         assert_eq!(actions[1].at_ms, 212);
-        assert_eq!(actions[2].at_ms, 247);
+        assert!(state.is_down("A"));
     }
 
     #[test]
-    fn retrigger_turns_overlapping_repeated_notes_into_short_taps() {
+    fn retrigger_holds_ordinary_notes_until_note_off() {
         let mut state = TriggerState::default();
         let mut rule = test_rule(NoteFilter::Single { value: 60 }, TriggerMode::Retrigger);
         rule.event_type = MidiEventType::Both;
-        rule.press_duration_ms = 6;
+        let note_on = MidiEvent::note_on(InputSource::File, Some(0), 1, 60, 90, 100);
+        let note_off = MidiEvent::note_off(InputSource::File, Some(0), 1, 60, 0, 300);
+
+        let mut actions = actions_for_rule(&rule, &note_on, &mut state);
+        actions.extend(actions_for_rule(&rule, &note_off, &mut state));
+
+        assert_eq!(
+            actions
+                .iter()
+                .map(|action| (action.kind, action.at_ms))
+                .collect::<Vec<_>>(),
+            vec![(KeyActionKind::Down, 100), (KeyActionKind::Up, 300)]
+        );
+        assert!(!state.is_down("A"));
+    }
+
+    #[test]
+    fn retrigger_inserts_release_gap_when_note_restarts_at_same_time() {
+        let mut state = TriggerState::default();
+        let mut rule = test_rule(NoteFilter::Single { value: 60 }, TriggerMode::Retrigger);
+        rule.event_type = MidiEventType::Both;
         rule.retrigger_gap_ms = 6;
         let first_on = MidiEvent::note_on(InputSource::File, Some(0), 1, 60, 90, 100);
-        let second_on = MidiEvent::note_on(InputSource::File, Some(0), 1, 60, 90, 110);
-        let late_off = MidiEvent::note_off(InputSource::File, Some(0), 1, 60, 0, 300);
+        let first_off = MidiEvent::note_off(InputSource::File, Some(0), 1, 60, 0, 180);
+        let second_on = MidiEvent::note_on(InputSource::File, Some(0), 1, 60, 90, 180);
+        let second_off = MidiEvent::note_off(InputSource::File, Some(0), 1, 60, 0, 300);
 
         let mut actions = actions_for_rule(&rule, &first_on, &mut state);
+        actions.extend(actions_for_rule(&rule, &first_off, &mut state));
         actions.extend(actions_for_rule(&rule, &second_on, &mut state));
-        actions.extend(actions_for_rule(&rule, &late_off, &mut state));
+        actions.extend(actions_for_rule(&rule, &second_off, &mut state));
 
         assert_eq!(
             actions
@@ -385,12 +430,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (KeyActionKind::Down, 100),
-                (KeyActionKind::Up, 106),
-                (KeyActionKind::Down, 110),
-                (KeyActionKind::Up, 116),
+                (KeyActionKind::Up, 180),
+                (KeyActionKind::Down, 186),
+                (KeyActionKind::Up, 300),
             ]
         );
-        assert!(!state.is_down("A"));
     }
 
     #[test]

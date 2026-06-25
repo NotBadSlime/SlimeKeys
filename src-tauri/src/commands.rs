@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(actions[0].at_ms, 100);
         assert_eq!(actions[1].key, "Z");
         assert_eq!(actions[1].kind, crate::model::KeyActionKind::Up);
-        assert_eq!(actions[1].at_ms, 135);
+        assert_eq!(actions[1].at_ms, 180);
     }
 
     #[test]
@@ -502,7 +502,7 @@ mod tests {
         assert_eq!(actions[0].at_ms, 100);
         assert_eq!(actions[1].key, "X");
         assert_eq!(actions[1].kind, crate::model::KeyActionKind::Up);
-        assert_eq!(actions[1].at_ms, 135);
+        assert_eq!(actions[1].at_ms, 190);
     }
 
     #[test]
