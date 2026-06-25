@@ -53,12 +53,6 @@ fn list_runtime_midi_input_devices() -> Result<Vec<MidiInputDevice>, MidiInputEr
         .collect()
 }
 
-#[cfg(windows)]
-fn runtime_midi_input_source() -> MidiInputSource {
-    MidiInputSource::WindowsMidiServices
-}
-
-#[cfg(not(windows))]
 fn runtime_midi_input_source() -> MidiInputSource {
     MidiInputSource::WinMm
 }
@@ -80,6 +74,12 @@ mod tests {
             devices.iter().all(|device| device.available_for_live),
             "device list should not include slow shell-scanned fallback devices: {devices:?}"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_runtime_uses_winmm_backend() {
+        assert_eq!(runtime_midi_input_source(), MidiInputSource::WinMm);
     }
 
     #[cfg(windows)]

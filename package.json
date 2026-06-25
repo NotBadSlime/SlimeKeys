@@ -10,7 +10,8 @@
     "test:watch": "vitest",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:build:x86": "tauri build --target i686-pc-windows-msvc"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",
