@@ -69,7 +69,8 @@ export const translations = {
       "If repeated notes sound like one long press, use Tap or Retrigger. Start with an 8-20 ms release gap.",
     liveFailed: "Live input failed",
     midiDevicesFound: "MIDI devices found",
-    midiDevicesNotFound: "No MIDI input devices found. Start loopMIDI, create a port, then refresh.",
+    midiDevicesNotFound:
+      'No MIDI input devices found. loopMIDI must have a real port row in its top list; the "New port-name" field alone does not create a port. Click + in loopMIDI, then refresh.',
     midiDevicesRefreshFailed: "MIDI device refresh failed",
     midiServicesDetected:
       "Detected by Windows, but it is not exposed to SlimeKeys' live input backend yet.",
@@ -140,7 +141,8 @@ export const translations = {
       "如果连续音符听起来像一次长按，请使用 Tap 或 Retrigger，并从 8-20 ms 断开间隙开始调。",
     liveFailed: "实时输入失败",
     midiDevicesFound: "已发现 MIDI 设备",
-    midiDevicesNotFound: "未发现 MIDI 输入设备。请启动 loopMIDI、创建端口，然后刷新。",
+    midiDevicesNotFound:
+      "未发现 MIDI 输入设备。loopMIDI 开机自启还不够；上方列表里必须有已创建的端口行，底部 New port-name 只是待创建名称。请在 loopMIDI 点击 + 后刷新。",
     midiDevicesRefreshFailed: "刷新 MIDI 设备失败",
     midiServicesDetected:
       "Windows 已识别此设备，但 SlimeKeys 的实时输入后端暂时还没暴露它。",

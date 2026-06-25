@@ -19,4 +19,11 @@ describe("createTranslator", () => {
 
     expect(t("detectedOnly")).toBe("仅识别");
   });
+
+  it("explains that loopMIDI needs an actual created port", () => {
+    const t = createTranslator("zh");
+
+    expect(t("midiDevicesNotFound")).toContain("上方列表");
+    expect(t("midiDevicesNotFound")).toContain("New port-name");
+  });
 });
