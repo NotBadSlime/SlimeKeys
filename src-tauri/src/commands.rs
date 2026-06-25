@@ -155,6 +155,19 @@ pub fn list_midi_files_near(path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+pub fn import_preset_file(path: String) -> Result<Preset, String> {
+    let bytes = fs::read(&path).map_err(|err| format!("failed to read preset file: {err}"))?;
+    serde_json::from_slice(&bytes).map_err(|err| format!("failed to parse preset JSON: {err}"))
+}
+
+#[tauri::command]
+pub fn export_preset_file(path: String, preset: Preset) -> Result<(), String> {
+    let json = serde_json::to_vec_pretty(&preset)
+        .map_err(|err| format!("failed to serialize preset: {err}"))?;
+    fs::write(&path, json).map_err(|err| format!("failed to write preset file: {err}"))
+}
+
+#[tauri::command]
 pub fn play_midi_file(
     path: String,
     preset: Preset,
@@ -525,6 +538,20 @@ mod tests {
             file_names(&files),
             vec!["LOUD.MID".to_string(), "soft.Midi".to_string()]
         );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn imports_and_exports_preset_json() {
+        let dir = create_test_dir("imports_and_exports_preset_json");
+        let path = dir.join("preset.json");
+        let preset = genshin_21_key_preset();
+
+        export_preset_file(path.to_string_lossy().to_string(), preset.clone()).unwrap();
+        let imported = import_preset_file(path.to_string_lossy().to_string()).unwrap();
+
+        assert_eq!(imported, preset);
 
         fs::remove_dir_all(dir).unwrap();
     }

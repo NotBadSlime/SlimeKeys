@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import {
   Download,
@@ -60,6 +60,13 @@ import {
   midiDurationMs,
   playbackStartMs,
 } from "./lib/playbackProgress";
+import {
+  createPresetFromSource,
+  deletePresetById,
+  fileNameForPreset,
+  prepareImportedPreset,
+  withJsonExtension,
+} from "./lib/presetManagement";
 import {
   addRuleToPreset,
   formatRuleKeys,
@@ -610,6 +617,76 @@ function App() {
     }
   }
 
+  function handleCreatePreset() {
+    const preset = createPresetFromSource(selectedPreset, presets);
+    setPresets((current) => [...current, preset]);
+    setSelectedPresetId(preset.id);
+    pushLog(`${t("presetCreated")}: ${preset.name}`);
+  }
+
+  async function handleImportPreset() {
+    try {
+      const selected = await open({
+        filters: [{ name: "SlimeKeys Preset", extensions: ["json"] }],
+      });
+      if (!selected || Array.isArray(selected)) {
+        return;
+      }
+
+      const imported = await invoke<Preset>("import_preset_file", {
+        path: selected,
+      });
+      const preset = prepareImportedPreset(imported, presets);
+      setPresets((current) => [...current, preset]);
+      setSelectedPresetId(preset.id);
+      pushLog(`${t("presetImported")}: ${preset.name}`);
+    } catch (error) {
+      pushLog(`${t("presetImportFailed")}: ${readableError(error)}`);
+    }
+  }
+
+  async function handleExportPreset() {
+    try {
+      const selected = await save({
+        defaultPath: fileNameForPreset(selectedPreset),
+        filters: [{ name: "SlimeKeys Preset", extensions: ["json"] }],
+      });
+      if (!selected) {
+        return;
+      }
+
+      await invoke("export_preset_file", {
+        path: withJsonExtension(selected),
+        preset: selectedPreset,
+      });
+      pushLog(`${t("presetExported")}: ${selectedPreset.name}`);
+    } catch (error) {
+      pushLog(`${t("presetExportFailed")}: ${readableError(error)}`);
+    }
+  }
+
+  async function handleDeletePreset() {
+    if (presets.length <= 1) {
+      pushLog(t("cannotDeleteLastPreset"));
+      return;
+    }
+
+    const shouldDelete = await confirm(t("deletePresetConfirm"), {
+      title: "SlimeKeys",
+      kind: "warning",
+      okLabel: t("deletePreset"),
+      cancelLabel: t("cancel"),
+    });
+    if (!shouldDelete) {
+      return;
+    }
+
+    const result = deletePresetById(presets, selectedPreset.id);
+    setPresets(result.presets);
+    setSelectedPresetId(result.selectedPresetId);
+    pushLog(result.deleted ? t("presetDeleted") : t("cannotDeleteLastPreset"));
+  }
+
   function handleRecordHotkey(action: HotkeyAction) {
     setRecordingAction(action);
     pushLog(`${t("hotkeyRecording")}: ${t(hotkeyActionLabels[action])}`);
@@ -707,16 +784,16 @@ function App() {
         </div>
 
         <div className="panel-actions">
-          <button title="New preset" type="button">
+          <button onClick={handleCreatePreset} title={t("newPreset")} type="button">
             <Plus size={16} />
           </button>
-          <button title={t("importPreset")} type="button">
+          <button onClick={() => void handleImportPreset()} title={t("importPreset")} type="button">
             <Import size={16} />
           </button>
-          <button title={t("exportPreset")} type="button">
+          <button onClick={() => void handleExportPreset()} title={t("exportPreset")} type="button">
             <Download size={16} />
           </button>
-          <button title="Delete preset" type="button">
+          <button onClick={() => void handleDeletePreset()} title={t("deletePreset")} type="button">
             <Trash2 size={16} />
           </button>
         </div>

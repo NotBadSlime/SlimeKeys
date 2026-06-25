@@ -7,9 +7,10 @@ pub mod presets;
 pub mod rule_engine;
 
 use commands::{
-    get_app_snapshot, list_midi_files_near, list_midi_inputs, panic_release_all_keys,
-    parse_midi_file, play_midi_file, play_midi_file_from, set_output_enabled, start_live_input,
-    stop_live_input, stop_playback, AppState,
+    export_preset_file, get_app_snapshot, import_preset_file, list_midi_files_near,
+    list_midi_inputs, panic_release_all_keys, parse_midi_file, play_midi_file,
+    play_midi_file_from, set_output_enabled, start_live_input, stop_live_input, stop_playback,
+    AppState,
 };
 
 #[tauri::command]
@@ -27,6 +28,8 @@ pub fn run() {
             get_app_snapshot,
             list_midi_inputs,
             list_midi_files_near,
+            import_preset_file,
+            export_preset_file,
             parse_midi_file,
             play_midi_file,
             play_midi_file_from,
