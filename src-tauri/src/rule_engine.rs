@@ -9,6 +9,7 @@ use crate::model::{
 pub struct TriggerState {
     held_keys: BTreeSet<String>,
     chop_starts: BTreeMap<String, u64>,
+    hold_counts: BTreeMap<String, u16>,
     retrigger_release_at: BTreeMap<String, u64>,
 }
 
@@ -35,6 +36,32 @@ impl TriggerState {
 
     fn take_chop_start(&mut self, key: &str) -> Option<u64> {
         self.chop_starts.remove(key)
+    }
+
+    fn hold_note_on(&mut self, key: &str) -> bool {
+        let count = self.hold_counts.entry(key.to_string()).or_default();
+        *count = count.saturating_add(1);
+        if *count == 1 {
+            self.mark_down(key);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn hold_note_off(&mut self, key: &str) -> bool {
+        match self.hold_counts.get_mut(key) {
+            Some(count) if *count > 1 => {
+                *count -= 1;
+                false
+            }
+            Some(_) => {
+                self.hold_counts.remove(key);
+                self.mark_up(key);
+                true
+            }
+            None => false,
+        }
     }
 
     fn retrigger_release_at(&self, key: &str) -> Option<u64> {
@@ -181,9 +208,10 @@ fn hold_actions(rule: &Rule, event: &MidiEvent, state: &mut TriggerState) -> Vec
             .output
             .keys
             .iter()
-            .map(|key| {
-                state.mark_down(key);
-                key_action(key, KeyActionKind::Down, base)
+            .filter_map(|key| {
+                state
+                    .hold_note_on(key)
+                    .then(|| key_action(key, KeyActionKind::Down, base))
             })
             .collect(),
         MidiEventType::NoteOff => rule
@@ -191,12 +219,9 @@ fn hold_actions(rule: &Rule, event: &MidiEvent, state: &mut TriggerState) -> Vec
             .keys
             .iter()
             .filter_map(|key| {
-                if state.is_down(key) {
-                    state.mark_up(key);
-                    Some(key_action(key, KeyActionKind::Up, base))
-                } else {
-                    None
-                }
+                state
+                    .hold_note_off(key)
+                    .then(|| key_action(key, KeyActionKind::Up, base))
             })
             .collect(),
         MidiEventType::Both => Vec::new(),
@@ -292,6 +317,32 @@ mod tests {
 
         assert_eq!(down[0].kind, KeyActionKind::Down);
         assert_eq!(up[0].kind, KeyActionKind::Up);
+        assert!(!state.is_down("A"));
+    }
+
+    #[test]
+    fn hold_keeps_key_down_until_all_overlapping_notes_end() {
+        let mut state = TriggerState::default();
+        let mut rule = test_rule(NoteFilter::Single { value: 60 }, TriggerMode::Hold);
+        rule.event_type = MidiEventType::Both;
+        let first_on = MidiEvent::note_on(InputSource::File, Some(0), 1, 60, 90, 100);
+        let second_on = MidiEvent::note_on(InputSource::File, Some(0), 1, 60, 90, 130);
+        let first_off = MidiEvent::note_off(InputSource::File, Some(0), 1, 60, 0, 180);
+        let second_off = MidiEvent::note_off(InputSource::File, Some(0), 1, 60, 0, 300);
+
+        let mut actions = actions_for_rule(&rule, &first_on, &mut state);
+        actions.extend(actions_for_rule(&rule, &second_on, &mut state));
+        actions.extend(actions_for_rule(&rule, &first_off, &mut state));
+        assert!(state.is_down("A"));
+        actions.extend(actions_for_rule(&rule, &second_off, &mut state));
+
+        assert_eq!(
+            actions
+                .iter()
+                .map(|action| (action.kind, action.at_ms))
+                .collect::<Vec<_>>(),
+            vec![(KeyActionKind::Down, 100), (KeyActionKind::Up, 300)]
+        );
         assert!(!state.is_down("A"));
     }
 
