@@ -450,14 +450,10 @@ mod tests {
     #[test]
     fn builds_keyboard_actions_from_default_preset_events() {
         let preset = genshin_21_key_preset();
-        let events = vec![MidiEvent::note_on(
-            crate::model::InputSource::File,
-            Some(0),
-            1,
-            48,
-            90,
-            100,
-        )];
+        let events = vec![
+            MidiEvent::note_on(crate::model::InputSource::File, Some(0), 1, 48, 90, 100),
+            MidiEvent::note_off(crate::model::InputSource::File, Some(0), 1, 48, 0, 180),
+        ];
 
         let actions = build_actions_for_events(&preset, &events);
 
@@ -467,7 +463,7 @@ mod tests {
         assert_eq!(actions[0].at_ms, 100);
         assert_eq!(actions[1].key, "Z");
         assert_eq!(actions[1].kind, crate::model::KeyActionKind::Up);
-        assert_eq!(actions[1].at_ms, 135);
+        assert_eq!(actions[1].at_ms, 180);
     }
 
     #[test]
@@ -495,6 +491,7 @@ mod tests {
         let events = vec![
             MidiEvent::note_on(crate::model::InputSource::File, Some(0), 1, 48, 90, 100),
             MidiEvent::note_on(crate::model::InputSource::File, Some(0), 1, 50, 90, 300),
+            MidiEvent::note_off(crate::model::InputSource::File, Some(0), 1, 50, 0, 390),
         ];
 
         let actions = build_actions_for_events_from(&preset, &events, 200);
@@ -505,7 +502,7 @@ mod tests {
         assert_eq!(actions[0].at_ms, 100);
         assert_eq!(actions[1].key, "X");
         assert_eq!(actions[1].kind, crate::model::KeyActionKind::Up);
-        assert_eq!(actions[1].at_ms, 135);
+        assert_eq!(actions[1].at_ms, 190);
     }
 
     #[test]

@@ -50,7 +50,7 @@ pub fn genshin_21_key_preset() -> Preset {
                 enabled: true,
                 name: format!("{note_name} -> {key}"),
                 input_source: InputSource::All,
-                event_type: MidiEventType::NoteOn,
+                event_type: MidiEventType::Both,
                 track: None,
                 channel: None,
                 note: NoteFilter::Single { value: note },
@@ -58,7 +58,7 @@ pub fn genshin_21_key_preset() -> Preset {
                 output: KeyOutput {
                     keys: vec![key.to_string()],
                 },
-                trigger_mode: TriggerMode::Tap,
+                trigger_mode: TriggerMode::Retrigger,
                 press_duration_ms: 35,
                 retrigger_gap_ms: 12,
                 delay_ms: 0,
@@ -70,16 +70,16 @@ pub fn genshin_21_key_preset() -> Preset {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{NoteFilter, TriggerMode};
+    use crate::model::{MidiEventType, NoteFilter, TriggerMode};
 
     #[test]
-    fn genshin_default_has_twenty_one_tap_rules() {
+    fn genshin_default_has_twenty_one_retrigger_rules_for_both_events() {
         let preset = genshin_21_key_preset();
         assert_eq!(preset.rules.len(), 21);
-        assert!(preset
-            .rules
-            .iter()
-            .all(|rule| rule.trigger_mode == TriggerMode::Tap));
+        assert!(preset.rules.iter().all(|rule| {
+            rule.trigger_mode == TriggerMode::Retrigger
+                && rule.event_type == MidiEventType::Both
+        }));
     }
 
     #[test]

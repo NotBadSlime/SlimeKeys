@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Preset } from "../types";
-import { summarizePreset } from "./presets";
+import { fallbackGenshinPreset, summarizePreset } from "./presets";
 
 describe("summarizePreset", () => {
   it("counts enabled rules and trigger modes", () => {
@@ -55,5 +55,17 @@ describe("summarizePreset", () => {
 
     expect(summary.enabledRules).toBe(1);
     expect(summary.triggerModes).toEqual(["tap", "hold"]);
+  });
+});
+
+describe("fallbackGenshinPreset", () => {
+  it("defaults game rules to both events with retrigger mode", () => {
+    const preset = fallbackGenshinPreset();
+
+    expect(preset.rules).toHaveLength(21);
+    expect(preset.rules.every((rule) => rule.eventType === "both")).toBe(true);
+    expect(preset.rules.every((rule) => rule.triggerMode === "retrigger")).toBe(
+      true,
+    );
   });
 });

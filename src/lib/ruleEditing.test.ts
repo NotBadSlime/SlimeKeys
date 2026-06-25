@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Preset } from "../types";
 import {
   addRuleToPreset,
+  bulkUpdateRulesInPreset,
   formatRuleKeys,
   noteInputValue,
   parseSingleNoteInput,
@@ -52,9 +53,41 @@ describe("rule editing helpers", () => {
       enabled: true,
       name: "C4 -> A",
       inputSource: "all",
+      eventType: "both",
+      triggerMode: "retrigger",
+      pressDurationMs: 35,
+    });
+  });
+
+  it("bulk updates only enabled rules by default", () => {
+    const preset = {
+      ...addRuleToPreset(testPreset()),
+      rules: [
+        { ...testPreset().rules[0], enabled: false },
+        addRuleToPreset(testPreset()).rules[1],
+      ],
+    };
+
+    const updated = bulkUpdateRulesInPreset(preset, {
+      eventType: "both",
+      triggerMode: "retrigger",
+      inputSource: "file",
+      pressDurationMs: 18,
+    });
+
+    expect(updated.rules[0]).toMatchObject({
+      enabled: false,
       eventType: "noteOn",
       triggerMode: "tap",
+      inputSource: "all",
       pressDurationMs: 35,
+    });
+    expect(updated.rules[1]).toMatchObject({
+      enabled: true,
+      eventType: "both",
+      triggerMode: "retrigger",
+      inputSource: "file",
+      pressDurationMs: 18,
     });
   });
 

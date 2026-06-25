@@ -1,6 +1,10 @@
 import type { NoteFilter, Preset, Rule } from "../types";
 import { formatNoteFilter } from "./presets";
 
+export type BulkRulePatch = Partial<
+  Pick<Rule, "eventType" | "inputSource" | "pressDurationMs" | "triggerMode">
+>;
+
 export function addRuleToPreset(preset: Preset): Preset {
   const rule = defaultEditableRule(nextRuleId(preset.rules));
   return { ...preset, rules: [...preset.rules, rule] };
@@ -23,6 +27,20 @@ export function removeRuleFromPreset(preset: Preset, ruleId: string): Preset {
   return {
     ...preset,
     rules: preset.rules.filter((rule) => rule.id !== ruleId),
+  };
+}
+
+export function bulkUpdateRulesInPreset(
+  preset: Preset,
+  patch: BulkRulePatch,
+  options: { enabledOnly?: boolean } = {},
+): Preset {
+  const enabledOnly = options.enabledOnly ?? true;
+  return {
+    ...preset,
+    rules: preset.rules.map((rule) =>
+      enabledOnly && !rule.enabled ? rule : { ...rule, ...patch },
+    ),
   };
 }
 
@@ -91,13 +109,13 @@ function defaultEditableRule(id: string): Rule {
     enabled: true,
     name: "C4 -> A",
     inputSource: "all",
-    eventType: "noteOn",
+    eventType: "both",
     track: null,
     channel: null,
     note: { kind: "single", value: 60 },
     velocity: { min: 1, max: 127 },
     output: { keys: ["A"] },
-    triggerMode: "tap",
+    triggerMode: "retrigger",
     pressDurationMs: 35,
     retriggerGapMs: 12,
     delayMs: 0,

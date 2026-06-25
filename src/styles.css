@@ -324,6 +324,14 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+.section-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .section-heading h2,
 .inspector h2 {
   font-size: 16px;
@@ -335,6 +343,38 @@ button:disabled {
   border: 1px solid #ced8d1;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.rule-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.rule-tools strong {
+  align-self: center;
+  min-width: 78px;
+  color: #26342c;
+  font-size: 13px;
+}
+
+.rule-tools label {
+  display: grid;
+  min-width: 118px;
+  gap: 4px;
+  color: #526158;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rule-tools .short-field {
+  min-width: 82px;
+}
+
+.rule-tools .command {
+  min-height: 30px;
 }
 
 .rule-row {

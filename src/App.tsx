@@ -17,6 +17,7 @@ import {
   Save,
   SkipBack,
   SkipForward,
+  SlidersHorizontal,
   Square,
   Trash2,
 } from "lucide-react";
@@ -48,6 +49,7 @@ import {
   shouldHandleShortcutEvent,
   validateHotkeyBindings,
 } from "./lib/hotkeys";
+import { parseStoredKeymap, stringifyKeymap } from "./lib/keymapStorage";
 import {
   eventTypeLabel,
   fallbackGenshinPreset,
@@ -69,6 +71,7 @@ import {
 } from "./lib/presetManagement";
 import {
   addRuleToPreset,
+  bulkUpdateRulesInPreset,
   formatRuleKeys,
   keysFromInput,
   noteInputValue,
@@ -79,18 +82,22 @@ import {
 import { selectRelativeSong, songEntryFromPath } from "./lib/songQueue";
 
 const HOTKEY_STORAGE_KEY = "slimekeys.hotkeys.v1";
+const KEYMAP_STORAGE_KEY = "slimekeys.keymap.v1";
 const EVENT_TYPES: MidiEventType[] = ["noteOn", "noteOff", "both"];
 const INPUT_SOURCES: InputSource[] = ["all", "file", "live"];
 const TRIGGER_MODES: TriggerMode[] = ["tap", "hold", "retrigger", "chop"];
 
 function App() {
+  const initialKeymap = useMemo(() => loadInitialKeymap(), []);
   const [language, setLanguage] = useState<Language>(() =>
     typeof navigator === "undefined"
       ? defaultLanguage
       : detectLanguage(navigator.language),
   );
-  const [presets, setPresets] = useState<Preset[]>([fallbackGenshinPreset()]);
-  const [selectedPresetId, setSelectedPresetId] = useState("genshin-21-key");
+  const [presets, setPresets] = useState<Preset[]>(initialKeymap.presets);
+  const [selectedPresetId, setSelectedPresetId] = useState(
+    initialKeymap.selectedPresetId,
+  );
   const [midiInputs, setMidiInputs] = useState<MidiInputDevice[]>([]);
   const [selectedInputId, setSelectedInputId] = useState("");
   const [outputEnabled, setOutputEnabled] = useState(false);
@@ -109,6 +116,11 @@ function App() {
   const [recordingAction, setRecordingAction] = useState<HotkeyAction | null>(
     null,
   );
+  const [bulkEventType, setBulkEventType] = useState<MidiEventType>("both");
+  const [bulkInputSource, setBulkInputSource] = useState<InputSource>("all");
+  const [bulkTriggerMode, setBulkTriggerMode] =
+    useState<TriggerMode>("retrigger");
+  const [bulkPressDurationMs, setBulkPressDurationMs] = useState(35);
   const [logs, setLogs] = useState<string[]>([]);
   const hotkeyHandlersRef = useRef<Record<HotkeyAction, () => void>>({
     play: () => undefined,
@@ -277,12 +289,31 @@ function App() {
   async function loadBackendState() {
     try {
       const snapshot = await invoke<AppSnapshot>("get_app_snapshot");
-      setPresets(snapshot.presets);
-      setSelectedPresetId(snapshot.presets[0]?.id ?? "genshin-21-key");
+      const storedKeymap = loadStoredKeymap();
+      const nextPresets = storedKeymap?.presets ?? snapshot.presets;
+      setPresets(nextPresets);
+      setSelectedPresetId(
+        selectedPresetIdFor(
+          nextPresets,
+          storedKeymap?.selectedPresetId ?? snapshot.presets[0]?.id,
+        ),
+      );
       setOutputEnabled(snapshot.outputEnabled);
-      pushLog(t("backendConnected"));
+      pushLog(storedKeymap ? t("keymapLoaded") : t("backendConnected"));
     } catch {
-      pushLog(t("previewMode"));
+      const storedKeymap = loadStoredKeymap();
+      if (storedKeymap) {
+        setPresets(storedKeymap.presets);
+        setSelectedPresetId(
+          selectedPresetIdFor(
+            storedKeymap.presets,
+            storedKeymap.selectedPresetId,
+          ),
+        );
+        pushLog(t("keymapLoaded"));
+      } else {
+        pushLog(t("previewMode"));
+      }
     }
 
     await refreshMidiInputs(true);
@@ -716,6 +747,41 @@ function App() {
     pushLog(t("ruleDeleted"));
   }
 
+  function handleApplyBulkRules() {
+    const enabledRuleCount = selectedPreset.rules.filter(
+      (rule) => rule.enabled,
+    ).length;
+    if (enabledRuleCount === 0) {
+      pushLog(t("noEnabledRules"));
+      return;
+    }
+
+    updateSelectedPreset((preset) =>
+      bulkUpdateRulesInPreset(preset, {
+        eventType: bulkEventType,
+        inputSource: bulkInputSource,
+        pressDurationMs: bulkPressDurationMs,
+        triggerMode: bulkTriggerMode,
+      }),
+    );
+    pushLog(`${t("bulkRulesApplied")}: ${enabledRuleCount}`);
+  }
+
+  function handleSaveKeymap() {
+    try {
+      window.localStorage.setItem(
+        KEYMAP_STORAGE_KEY,
+        stringifyKeymap({
+          presets,
+          selectedPresetId: selectedPreset.id,
+        }),
+      );
+      pushLog(t("keymapSaved"));
+    } catch (error) {
+      pushLog(`${t("keymapSaveFailed")}: ${readableError(error)}`);
+    }
+  }
+
   function patchRule(ruleId: string, patch: Partial<Rule>) {
     updateSelectedPreset((preset) => updateRuleInPreset(preset, ruleId, patch));
   }
@@ -973,9 +1039,102 @@ function App() {
                 <h2>{t("rules")}</h2>
                 <p>{t("triggerHint")}</p>
               </div>
-              <button className="command" onClick={handleAddRule} type="button">
-                <Plus size={16} />
-                <span>{t("addRule")}</span>
+              <div className="section-actions">
+                <button
+                  className="command"
+                  onClick={handleSaveKeymap}
+                  type="button"
+                >
+                  <Save size={16} />
+                  <span>{t("saveKeymap")}</span>
+                </button>
+                <button
+                  className="command"
+                  onClick={handleAddRule}
+                  type="button"
+                >
+                  <Plus size={16} />
+                  <span>{t("addRule")}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="rule-tools" aria-label={t("bulkRules")}>
+              <strong>{t("bulkRules")}</strong>
+              <label>
+                <span>{t("event")}</span>
+                <select
+                  className="rule-field"
+                  onChange={(event) =>
+                    setBulkEventType(event.target.value as MidiEventType)
+                  }
+                  value={bulkEventType}
+                >
+                  {EVENT_TYPES.map((eventType) => (
+                    <option key={eventType} value={eventType}>
+                      {eventTypeLabel(eventType)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{t("source")}</span>
+                <select
+                  className="rule-field"
+                  onChange={(event) =>
+                    setBulkInputSource(event.target.value as InputSource)
+                  }
+                  value={bulkInputSource}
+                >
+                  {INPUT_SOURCES.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{t("mode")}</span>
+                <select
+                  className="rule-field"
+                  onChange={(event) =>
+                    setBulkTriggerMode(event.target.value as TriggerMode)
+                  }
+                  value={bulkTriggerMode}
+                >
+                  {TRIGGER_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {triggerModeLabel(mode)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="short-field">
+                <span>{t("pressMs")}</span>
+                <input
+                  className="rule-field"
+                  min={1}
+                  onChange={(event) =>
+                    setBulkPressDurationMs(
+                      clampInteger(
+                        event.target.value,
+                        bulkPressDurationMs,
+                        1,
+                        5000,
+                      ),
+                    )
+                  }
+                  type="number"
+                  value={bulkPressDurationMs}
+                />
+              </label>
+              <button
+                className="command"
+                onClick={handleApplyBulkRules}
+                type="button"
+              >
+                <SlidersHorizontal size={16} />
+                <span>{t("applyBulkRules")}</span>
               </button>
             </div>
 
@@ -1189,6 +1348,31 @@ function App() {
       </section>
     </main>
   );
+}
+
+function loadInitialKeymap() {
+  const storedKeymap = loadStoredKeymap();
+  const presets = storedKeymap?.presets ?? [fallbackGenshinPreset()];
+  return {
+    presets,
+    selectedPresetId: selectedPresetIdFor(presets, storedKeymap?.selectedPresetId),
+  };
+}
+
+function loadStoredKeymap() {
+  try {
+    return parseStoredKeymap(window.localStorage.getItem(KEYMAP_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function selectedPresetIdFor(presets: Preset[], preferredId?: string) {
+  if (preferredId && presets.some((preset) => preset.id === preferredId)) {
+    return preferredId;
+  }
+
+  return presets[0]?.id ?? "genshin-21-key";
 }
 
 function loadStoredHotkeys(): HotkeyBinding[] {
