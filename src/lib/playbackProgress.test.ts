@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatPlaybackTime, midiDurationMs } from "./playbackProgress";
+import {
+  formatPlaybackTime,
+  midiDurationMs,
+  playbackStartMs,
+} from "./playbackProgress";
 import type { MidiEvent } from "../types";
 
 describe("playbackProgress", () => {
@@ -16,6 +20,12 @@ describe("playbackProgress", () => {
   it("formats elapsed playback time", () => {
     expect(formatPlaybackTime(0)).toBe("0:00");
     expect(formatPlaybackTime(65_400)).toBe("1:05");
+  });
+
+  it("resumes from the current position until playback has reached the end", () => {
+    expect(playbackStartMs(52_000, 231_000)).toBe(52_000);
+    expect(playbackStartMs(231_000, 231_000)).toBe(0);
+    expect(playbackStartMs(999_000, 231_000)).toBe(0);
   });
 });
 

@@ -26,4 +26,10 @@ describe("createTranslator", () => {
     expect(t("midiDevicesNotFound")).toContain("上方列表");
     expect(t("midiDevicesNotFound")).toContain("New port-name");
   });
+
+  it("warns when playback starts while keyboard output is disabled", () => {
+    const t = createTranslator("zh");
+
+    expect(t("outputDisabledPlaybackWarning")).toContain("不会发送按键");
+  });
 });

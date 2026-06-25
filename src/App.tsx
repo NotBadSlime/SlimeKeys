@@ -54,6 +54,7 @@ import {
   clampPlaybackMs,
   formatPlaybackTime,
   midiDurationMs,
+  playbackStartMs,
 } from "./lib/playbackProgress";
 import { selectRelativeSong, songEntryFromPath } from "./lib/songQueue";
 
@@ -312,11 +313,12 @@ function App() {
   }
 
   async function handlePlay() {
-    const startAtMs =
-      playbackPositionMs > 0 && playbackPositionMs < songDurationMs
-        ? playbackPositionMs
-        : 0;
+    const startAtMs = playbackStartMs(playbackPositionMs, songDurationMs);
     await playSong(currentSong, startAtMs);
+  }
+
+  async function handlePause() {
+    await pausePlayback(true);
   }
 
   async function playSong(song: SongEntry | null, startAtMs = 0) {
@@ -347,6 +349,9 @@ function App() {
       startAtMs: seekMs,
     });
     beginProgress(seekMs, durationMs);
+    if (!outputEnabled) {
+      pushLog(t("outputDisabledPlaybackWarning"));
+    }
     pushLog(`${t("playbackStarted")}: ${actionCount}`);
   }
 
@@ -360,6 +365,24 @@ function App() {
       stopProgress(true);
       if (log) {
         pushLog(t("playbackStopped"));
+      }
+    } catch (error) {
+      pushLog(`${t("stopFailed")}: ${readableError(error)}`);
+    }
+  }
+
+  async function pausePlayback(log: boolean) {
+    if (!playbackActive) {
+      return;
+    }
+
+    const pausedAtMs = currentPlaybackPositionMs(songDurationMs);
+    try {
+      await invoke("stop_playback");
+      stopProgress(false);
+      setPlaybackPositionMs(pausedAtMs);
+      if (log) {
+        pushLog(t("playbackPaused"));
       }
     } catch (error) {
       pushLog(`${t("stopFailed")}: ${readableError(error)}`);
@@ -487,6 +510,15 @@ function App() {
         setPlaybackActive(false);
       }
     }, 100);
+  }
+
+  function currentPlaybackPositionMs(durationMs: number) {
+    if (!playbackActive) {
+      return clampPlaybackMs(playbackPositionMs, durationMs);
+    }
+
+    const elapsedMs = performance.now() - progressStartedAtRef.current;
+    return clampPlaybackMs(progressOffsetMsRef.current + elapsedMs, durationMs);
   }
 
   function stopProgress(resetPosition: boolean) {
@@ -648,7 +680,13 @@ function App() {
             <button className="icon-command" onClick={handlePlay} title={t("play")} type="button">
               <Play size={16} />
             </button>
-            <button className="icon-command" disabled title={t("pause")} type="button">
+            <button
+              className="icon-command"
+              disabled={!playbackActive}
+              onClick={handlePause}
+              title={t("pause")}
+              type="button"
+            >
               <Pause size={16} />
             </button>
             <button className="icon-command" onClick={handleStop} title={t("stop")} type="button">
