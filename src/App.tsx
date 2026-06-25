@@ -24,10 +24,14 @@ import type {
   AppSnapshot,
   HotkeyAction,
   HotkeyBinding,
+  InputSource,
   MidiEvent,
+  MidiEventType,
   MidiInputDevice,
   Preset,
+  Rule,
   SongEntry,
+  TriggerMode,
 } from "./types";
 import {
   createTranslator,
@@ -47,7 +51,6 @@ import {
 import {
   eventTypeLabel,
   fallbackGenshinPreset,
-  formatNoteFilter,
   summarizePreset,
   triggerModeLabel,
 } from "./lib/presets";
@@ -57,9 +60,21 @@ import {
   midiDurationMs,
   playbackStartMs,
 } from "./lib/playbackProgress";
+import {
+  addRuleToPreset,
+  formatRuleKeys,
+  keysFromInput,
+  noteInputValue,
+  parseSingleNoteInput,
+  removeRuleFromPreset,
+  updateRuleInPreset,
+} from "./lib/ruleEditing";
 import { selectRelativeSong, songEntryFromPath } from "./lib/songQueue";
 
 const HOTKEY_STORAGE_KEY = "slimekeys.hotkeys.v1";
+const EVENT_TYPES: MidiEventType[] = ["noteOn", "noteOff", "both"];
+const INPUT_SOURCES: InputSource[] = ["all", "file", "live"];
+const TRIGGER_MODES: TriggerMode[] = ["tap", "hold", "retrigger", "chop"];
 
 function App() {
   const [language, setLanguage] = useState<Language>(() =>
@@ -348,6 +363,7 @@ function App() {
     const actionCount = await invoke<number>("play_midi_file_from", {
       path: song.path,
       startAtMs: seekMs,
+      preset: selectedPreset,
     });
     beginProgress(seekMs, durationMs);
     if (!outputEnabled) {
@@ -558,6 +574,7 @@ function App() {
       if (next) {
         await invoke("start_live_input", {
           deviceId: Number(selectedInputId),
+          preset: selectedPreset,
         });
         pushLog(t("liveInputEnabled"));
       } else {
@@ -610,6 +627,63 @@ function App() {
       setRecordingAction(null);
     }
     pushLog(`${t("hotkeyCleared")}: ${t(hotkeyActionLabels[action])}`);
+  }
+
+  function handleAddRule() {
+    updateSelectedPreset(addRuleToPreset);
+    pushLog(t("ruleAdded"));
+  }
+
+  function handleDeleteRule(ruleId: string) {
+    updateSelectedPreset((preset) => removeRuleFromPreset(preset, ruleId));
+    pushLog(t("ruleDeleted"));
+  }
+
+  function patchRule(ruleId: string, patch: Partial<Rule>) {
+    updateSelectedPreset((preset) => updateRuleInPreset(preset, ruleId, patch));
+  }
+
+  function commitRuleName(ruleId: string, value: string, fallback: string) {
+    const name = value.trim();
+    patchRule(ruleId, { name: name || fallback });
+  }
+
+  function commitRuleNote(
+    rule: Rule,
+    value: string,
+    input: HTMLInputElement,
+  ) {
+    const note = parseSingleNoteInput(value);
+    if (note === null) {
+      input.value = noteInputValue(rule.note);
+      pushLog(t("invalidNoteInput"));
+      return;
+    }
+
+    patchRule(rule.id, { note: { kind: "single", value: note } });
+  }
+
+  function commitRuleKeys(
+    rule: Rule,
+    value: string,
+    input: HTMLInputElement,
+  ) {
+    const keys = keysFromInput(value);
+    if (keys.length === 0) {
+      input.value = formatRuleKeys(rule);
+      pushLog(t("invalidKeyInput"));
+      return;
+    }
+
+    patchRule(rule.id, { output: { keys } });
+  }
+
+  function updateSelectedPreset(transform: (preset: Preset) => Preset) {
+    setPresets((current) =>
+      current.map((preset) =>
+        preset.id === selectedPreset.id ? transform(preset) : preset,
+      ),
+    );
   }
 
   function updateHotkeys(nextHotkeys: HotkeyBinding[]) {
@@ -822,7 +896,7 @@ function App() {
                 <h2>{t("rules")}</h2>
                 <p>{t("triggerHint")}</p>
               </div>
-              <button className="command" type="button">
+              <button className="command" onClick={handleAddRule} type="button">
                 <Plus size={16} />
                 <span>{t("addRule")}</span>
               </button>
@@ -831,28 +905,137 @@ function App() {
             <div className="rule-table" role="table" aria-label="Rule table">
               <div className="rule-row header" role="row">
                 <span>On</span>
-                <span>Name</span>
-                <span>Event</span>
-                <span>Source</span>
-                <span>Keys</span>
-                <span>Mode</span>
-                <span>Press</span>
+                <span>{t("ruleName")}</span>
+                <span>{t("note")}</span>
+                <span>{t("event")}</span>
+                <span>{t("source")}</span>
+                <span>{t("keys")}</span>
+                <span>{t("mode")}</span>
+                <span>{t("pressMs")}</span>
+                <span />
               </div>
               {selectedPreset.rules.map((rule) => (
                 <div className="rule-row" role="row" key={rule.id}>
                   <span>
-                    <input type="checkbox" checked={rule.enabled} readOnly />
+                    <input
+                      type="checkbox"
+                      checked={rule.enabled}
+                      onChange={(event) =>
+                        patchRule(rule.id, { enabled: event.target.checked })
+                      }
+                    />
                   </span>
-                  <span title={formatNoteFilter(rule.note)}>{rule.name}</span>
-                  <span>{eventTypeLabel(rule.eventType)}</span>
-                  <span>{rule.inputSource}</span>
-                  <span>{rule.output.keys.join(" + ")}</span>
                   <span>
-                    <span className={`mode-badge ${rule.triggerMode}`}>
-                      {triggerModeLabel(rule.triggerMode)}
-                    </span>
+                    <input
+                      className="rule-field"
+                      defaultValue={rule.name}
+                      onBlur={(event) =>
+                        commitRuleName(rule.id, event.target.value, rule.name)
+                      }
+                      type="text"
+                    />
                   </span>
-                  <span>{rule.pressDurationMs} ms</span>
+                  <span>
+                    <input
+                      className="rule-field"
+                      defaultValue={noteInputValue(rule.note)}
+                      onBlur={(event) =>
+                        commitRuleNote(rule, event.target.value, event.target)
+                      }
+                      title="C4 / C#4 / 60"
+                      type="text"
+                    />
+                  </span>
+                  <span>
+                    <select
+                      className="rule-field"
+                      value={rule.eventType}
+                      onChange={(event) =>
+                        patchRule(rule.id, {
+                          eventType: event.target.value as MidiEventType,
+                        })
+                      }
+                    >
+                      {EVENT_TYPES.map((eventType) => (
+                        <option key={eventType} value={eventType}>
+                          {eventTypeLabel(eventType)}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                  <span>
+                    <select
+                      className="rule-field"
+                      value={rule.inputSource}
+                      onChange={(event) =>
+                        patchRule(rule.id, {
+                          inputSource: event.target.value as InputSource,
+                        })
+                      }
+                    >
+                      {INPUT_SOURCES.map((source) => (
+                        <option key={source} value={source}>
+                          {source}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                  <span>
+                    <input
+                      className="rule-field"
+                      defaultValue={formatRuleKeys(rule)}
+                      onBlur={(event) =>
+                        commitRuleKeys(rule, event.target.value, event.target)
+                      }
+                      title="A / Ctrl + A"
+                      type="text"
+                    />
+                  </span>
+                  <span>
+                    <select
+                      className="rule-field"
+                      value={rule.triggerMode}
+                      onChange={(event) =>
+                        patchRule(rule.id, {
+                          triggerMode: event.target.value as TriggerMode,
+                        })
+                      }
+                    >
+                      {TRIGGER_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {triggerModeLabel(mode)}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                  <span>
+                    <input
+                      className="rule-field"
+                      min={1}
+                      onChange={(event) =>
+                        patchRule(rule.id, {
+                          pressDurationMs: clampInteger(
+                            event.target.value,
+                            rule.pressDurationMs,
+                            1,
+                            5000,
+                          ),
+                        })
+                      }
+                      type="number"
+                      value={rule.pressDurationMs}
+                    />
+                  </span>
+                  <span>
+                    <button
+                      className="icon-command"
+                      onClick={() => handleDeleteRule(rule.id)}
+                      title={t("deleteRule")}
+                      type="button"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
                 </div>
               ))}
             </div>
@@ -947,6 +1130,20 @@ function persistHotkeys(hotkeys: HotkeyBinding[]) {
   } catch {
     // Local storage is best-effort; the in-memory setting still applies.
   }
+}
+
+function clampInteger(
+  value: string,
+  fallback: number,
+  min: number,
+  max: number,
+) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.round(parsed)));
 }
 
 function readableError(error: unknown): string {

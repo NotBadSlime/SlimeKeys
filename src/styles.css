@@ -339,8 +339,12 @@ button:disabled {
 
 .rule-row {
   display: grid;
-  grid-template-columns: 48px 1.2fr 0.9fr 0.8fr 0.7fr 0.8fr 0.7fr;
-  min-height: 38px;
+  grid-template-columns:
+    48px minmax(150px, 1.1fr) minmax(78px, 0.55fr)
+    minmax(106px, 0.7fr) minmax(88px, 0.55fr) minmax(112px, 0.75fr)
+    minmax(116px, 0.8fr) 86px 42px;
+  min-width: 960px;
+  min-height: 44px;
   align-items: center;
   border-top: 1px solid #edf1ee;
 }
@@ -352,7 +356,7 @@ button:disabled {
 .rule-row span {
   min-width: 0;
   overflow: hidden;
-  padding: 0 10px;
+  padding: 0 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -366,6 +370,22 @@ button:disabled {
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.rule-field {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid #d4ddd7;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #18201c;
+  padding: 0 7px;
+}
+
+.rule-field:focus {
+  border-color: #2f7f5f;
+  outline: 2px solid rgba(47, 127, 95, 0.16);
 }
 
 .mode-badge {

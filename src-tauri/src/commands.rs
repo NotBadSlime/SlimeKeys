@@ -155,22 +155,26 @@ pub fn list_midi_files_near(path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub fn play_midi_file(path: String, state: State<'_, AppState>) -> Result<usize, String> {
-    play_midi_file_from(path, 0, state)
+pub fn play_midi_file(
+    path: String,
+    preset: Preset,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    play_midi_file_from(path, 0, preset, state)
 }
 
 #[tauri::command]
 pub fn play_midi_file_from(
     path: String,
     start_at_ms: u64,
+    preset: Preset,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
     stop_existing_playback(&state)?;
     release_all(&state)?;
 
     let bytes = fs::read(&path).map_err(|err| format!("failed to read MIDI file: {err}"))?;
-    let events = parse_midi_bytes(&bytes).map_err(|err| err.to_string())?;
-    let actions = build_actions_for_events_from(&genshin_21_key_preset(), &events, start_at_ms);
+    let actions = build_file_playback_actions(&preset, &bytes, start_at_ms)?;
     let action_count = actions.len();
     let cancel = Arc::new(AtomicBool::new(false));
 
@@ -211,7 +215,11 @@ pub fn panic_release_all_keys(state: State<'_, AppState>) -> Result<(), String> 
 }
 
 #[tauri::command]
-pub fn start_live_input(device_id: usize, state: State<'_, AppState>) -> Result<(), String> {
+pub fn start_live_input(
+    device_id: usize,
+    preset: Preset,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     stop_live_input(state.clone())?;
 
     let input =
@@ -225,7 +233,6 @@ pub fn start_live_input(device_id: usize, state: State<'_, AppState>) -> Result<
         .map_err(|err| format!("failed to read MIDI input name: {err}"))?;
     let output_enabled = state.output_enabled.clone();
     let keyboard = state.keyboard.clone();
-    let preset = genshin_21_key_preset();
     let mut trigger_state = TriggerState::default();
 
     let connection = input
@@ -254,6 +261,15 @@ pub fn start_live_input(device_id: usize, state: State<'_, AppState>) -> Result<
         .map_err(|_| "live input state lock is poisoned".to_string())? = Some(connection);
 
     Ok(())
+}
+
+fn build_file_playback_actions(
+    preset: &Preset,
+    bytes: &[u8],
+    start_at_ms: u64,
+) -> Result<Vec<KeyAction>, String> {
+    let events = parse_midi_bytes(bytes).map_err(|err| err.to_string())?;
+    Ok(build_actions_for_events_from(preset, &events, start_at_ms))
 }
 
 #[tauri::command]
@@ -442,6 +458,25 @@ mod tests {
     }
 
     #[test]
+    fn builds_file_playback_actions_from_supplied_preset() {
+        let mut preset = genshin_21_key_preset();
+        let mut custom_rule = preset
+            .rules
+            .iter()
+            .find(|rule| rule.name == "C4 -> A")
+            .unwrap()
+            .clone();
+        custom_rule.output.keys = vec!["P".to_string()];
+        preset.rules = vec![custom_rule];
+
+        let actions = build_file_playback_actions(&preset, &simple_midi_bytes(), 0).unwrap();
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].key, "P");
+        assert_eq!(actions[1].key, "P");
+    }
+
+    #[test]
     fn builds_keyboard_actions_from_seek_offset_relative_to_seek_start() {
         let preset = genshin_21_key_preset();
         let events = vec![
@@ -514,5 +549,12 @@ mod tests {
                     .to_string()
             })
             .collect()
+    }
+
+    fn simple_midi_bytes() -> Vec<u8> {
+        vec![
+            b'M', b'T', b'h', b'd', 0, 0, 0, 6, 0, 0, 0, 1, 0, 96, b'M', b'T', b'r', b'k', 0, 0,
+            0, 12, 0, 0x90, 60, 64, 96, 0x80, 60, 0, 0, 0xff, 0x2f, 0,
+        ]
     }
 }
