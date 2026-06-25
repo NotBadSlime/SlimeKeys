@@ -42,7 +42,7 @@ import {
   type TranslationKey,
 } from "./lib/i18n";
 import {
-  acceleratorFromKeyboardEvent,
+  captureHotkeyFromKeyboardEvent,
   DEFAULT_HOTKEYS,
   mergeSavedHotkeys,
   normalizeAccelerator,
@@ -173,13 +173,39 @@ function App() {
       event.preventDefault();
       event.stopPropagation();
 
-      const accelerator = acceleratorFromKeyboardEvent(event);
-      if (!accelerator) {
+      const result = captureHotkeyFromKeyboardEvent(event);
+      if (result.kind === "pending") {
+        return;
+      }
+
+      if (result.kind === "cancel") {
+        setRecordingAction(null);
+        pushLog(t("hotkeyRecordingCancelled"));
+        return;
+      }
+
+      if (result.kind === "clear") {
+        const nextHotkeys = hotkeys.map((binding) =>
+          binding.action === recordingAction
+            ? { ...binding, accelerator: "", enabled: false }
+            : binding,
+        );
+        persistHotkeys(nextHotkeys);
+        setHotkeys(nextHotkeys);
+        setRecordingAction(null);
+        pushLog(
+          `${t("hotkeyCleared")}: ${t(hotkeyActionLabels[recordingAction])}`,
+        );
+        return;
+      }
+
+      if (result.kind === "invalid") {
         pushLog(t("hotkeyInvalid"));
         setRecordingAction(null);
         return;
       }
 
+      const accelerator = result.accelerator;
       const nextHotkeys = hotkeys.map((binding) =>
         binding.action === recordingAction
           ? { ...binding, accelerator, enabled: true }
@@ -719,6 +745,12 @@ function App() {
   }
 
   function handleRecordHotkey(action: HotkeyAction) {
+    if (recordingAction === action) {
+      setRecordingAction(null);
+      pushLog(t("hotkeyRecordingCancelled"));
+      return;
+    }
+
     setRecordingAction(action);
     pushLog(`${t("hotkeyRecording")}: ${t(hotkeyActionLabels[action])}`);
   }
@@ -1304,35 +1336,51 @@ function App() {
 
             <h2>{t("hotkeys")}</h2>
             <div className="hotkey-list">
-              {hotkeys.map((binding) => (
-                <div className="hotkey-row" key={binding.action}>
-                  <span>{t(hotkeyActionLabels[binding.action])}</span>
-                  <kbd>
-                    {recordingAction === binding.action
-                      ? t("hotkeyRecordingShort")
-                      : binding.enabled && binding.accelerator
-                        ? binding.accelerator
-                        : t("hotkeyUnset")}
-                  </kbd>
-                  <button
-                    className="icon-command"
-                    onClick={() => handleRecordHotkey(binding.action)}
-                    title={t("recordHotkey")}
-                    type="button"
+              {hotkeys.map((binding) => {
+                const isRecording = recordingAction === binding.action;
+                const hasHotkey = binding.enabled && binding.accelerator;
+                const hotkeyLabel = isRecording
+                  ? t("hotkeyRecordingShort")
+                  : hasHotkey
+                    ? binding.accelerator
+                    : t("hotkeyClickToSet");
+
+                return (
+                  <div
+                    className={`hotkey-row${
+                      isRecording ? " is-recording" : ""
+                    }`}
+                    key={binding.action}
                   >
-                    <Keyboard size={15} />
-                  </button>
-                  <button
-                    className="icon-command"
-                    disabled={!binding.accelerator}
-                    onClick={() => handleClearHotkey(binding.action)}
-                    title={t("clearHotkey")}
-                    type="button"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              ))}
+                    <span className="hotkey-action-label">
+                      {t(hotkeyActionLabels[binding.action])}
+                    </span>
+                    <button
+                      aria-label={`${t("recordHotkey")}: ${t(
+                        hotkeyActionLabels[binding.action],
+                      )}`}
+                      className={`hotkey-trigger${hasHotkey ? "" : " is-empty"}`}
+                      onClick={() => handleRecordHotkey(binding.action)}
+                      title={
+                        isRecording ? t("hotkeyRecordingHint") : t("recordHotkey")
+                      }
+                      type="button"
+                    >
+                      <Keyboard size={15} />
+                      <span>{hotkeyLabel}</span>
+                    </button>
+                    <button
+                      className="icon-command"
+                      disabled={!binding.accelerator}
+                      onClick={() => handleClearHotkey(binding.action)}
+                      title={t("clearHotkey")}
+                      type="button"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
 
             <h2>{t("recentEvents")}</h2>

@@ -22,9 +22,21 @@ type SavedHotkeyBinding = {
   enabled?: unknown;
 };
 
+type KeyboardShortcutEvent = Pick<
+  KeyboardEvent,
+  "altKey" | "ctrlKey" | "key" | "metaKey" | "shiftKey"
+>;
+
 export type HotkeyValidationResult =
   | { ok: true }
   | { ok: false; error: "empty" | "duplicate" };
+
+export type HotkeyCaptureResult =
+  | { kind: "pending" }
+  | { kind: "cancel" }
+  | { kind: "clear" }
+  | { kind: "invalid" }
+  | { kind: "record"; accelerator: string };
 
 export function normalizeAccelerator(accelerator: string): string {
   return accelerator
@@ -34,7 +46,9 @@ export function normalizeAccelerator(accelerator: string): string {
     .join("+");
 }
 
-export function acceleratorFromKeyboardEvent(event: KeyboardEvent): string {
+export function acceleratorFromKeyboardEvent(
+  event: KeyboardShortcutEvent,
+): string {
   const key = normalizeEventKey(event.key);
   if (!key) {
     return "";
@@ -49,6 +63,33 @@ export function acceleratorFromKeyboardEvent(event: KeyboardEvent): string {
   ].filter(Boolean);
 
   return normalizeAccelerator(parts.join("+"));
+}
+
+export function captureHotkeyFromKeyboardEvent(
+  event: KeyboardShortcutEvent,
+): HotkeyCaptureResult {
+  const hasModifier =
+    event.ctrlKey || event.altKey || event.shiftKey || event.metaKey;
+  const key = normalizeEventKey(event.key);
+
+  if (!hasModifier && key === "Esc") {
+    return { kind: "cancel" };
+  }
+
+  if (!hasModifier && ["Backspace", "Delete"].includes(key)) {
+    return { kind: "clear" };
+  }
+
+  if (!key) {
+    return { kind: "pending" };
+  }
+
+  if (!hasModifier) {
+    return { kind: "invalid" };
+  }
+
+  const accelerator = acceleratorFromKeyboardEvent(event);
+  return accelerator ? { kind: "record", accelerator } : { kind: "pending" };
 }
 
 export function validateHotkeyBindings(
@@ -150,6 +191,8 @@ function normalizeAcceleratorPart(part: string): string {
     arrowup: "Up",
     arrowdown: "Down",
     backspace: "Backspace",
+    del: "Delete",
+    delete: "Delete",
     space: "Space",
     esc: "Esc",
     escape: "Esc",
@@ -180,6 +223,8 @@ function normalizeEventKey(key: string): string {
     ArrowUp: "Up",
     ArrowDown: "Down",
     " ": "Space",
+    Escape: "Esc",
+    Del: "Delete",
   };
   const normalized = aliases[key] ?? key;
   const lower = normalized.toLowerCase();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acceleratorFromKeyboardEvent,
+  captureHotkeyFromKeyboardEvent,
   DEFAULT_HOTKEYS,
   HOTKEY_ACTIONS,
   mergeSavedHotkeys,
@@ -82,6 +83,62 @@ describe("hotkey helpers", () => {
     } as KeyboardEvent;
 
     expect(acceleratorFromKeyboardEvent(event)).toBe("Ctrl+Alt+Right");
+  });
+
+  it("keeps recording open while only a modifier key is pressed", () => {
+    expect(
+      captureHotkeyFromKeyboardEvent({
+        ctrlKey: true,
+        altKey: false,
+        shiftKey: false,
+        metaKey: false,
+        key: "Control",
+      } as KeyboardEvent),
+    ).toEqual({ kind: "pending" });
+  });
+
+  it("captures only modifier-based shortcut combinations", () => {
+    expect(
+      captureHotkeyFromKeyboardEvent({
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        metaKey: false,
+        key: "P",
+      } as KeyboardEvent),
+    ).toEqual({ kind: "invalid" });
+
+    expect(
+      captureHotkeyFromKeyboardEvent({
+        ctrlKey: true,
+        altKey: true,
+        shiftKey: false,
+        metaKey: false,
+        key: "P",
+      } as KeyboardEvent),
+    ).toEqual({ kind: "record", accelerator: "Ctrl+Alt+P" });
+  });
+
+  it("supports cancel and clear keys while recording hotkeys", () => {
+    expect(
+      captureHotkeyFromKeyboardEvent({
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        metaKey: false,
+        key: "Escape",
+      } as KeyboardEvent),
+    ).toEqual({ kind: "cancel" });
+
+    expect(
+      captureHotkeyFromKeyboardEvent({
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        metaKey: false,
+        key: "Backspace",
+      } as KeyboardEvent),
+    ).toEqual({ kind: "clear" });
   });
 
   it("runs global hotkey actions after the shortcut key is released", () => {
