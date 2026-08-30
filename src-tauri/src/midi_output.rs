@@ -1,17 +1,5 @@
-use std::{
-    collections::BTreeMap,
-    sync::{atomic::AtomicBool, Arc, Mutex},
-    thread,
-};
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-use crate::{
-    audition_engine::{dispatch_audition_events, MidiSynth, RustySynth},
-    model::MidiEvent,
-    playback_clock::PlaybackClock,
-};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,30 +35,6 @@ pub fn list_midi_output_devices() -> Result<Vec<MidiOutputDevice>, MidiOutputErr
                 .map_err(|err| MidiOutputError::PortName(err.to_string()))
         })
         .collect()
-}
-
-pub fn dispatch_midi_events(
-    events: Vec<MidiEvent>,
-    clock: Arc<PlaybackClock>,
-    audition_delay_ms: u64,
-    cancel: Arc<AtomicBool>,
-    _release_on_cancel: Arc<AtomicBool>,
-    audition_enabled: Arc<Mutex<bool>>,
-    playback_tracks: Arc<Mutex<BTreeMap<Option<u16>, bool>>>,
-) -> Result<Option<thread::JoinHandle<()>>, MidiOutputError> {
-    let synth: Arc<Mutex<Box<dyn MidiSynth>>> = Arc::new(Mutex::new(Box::new(
-        RustySynth::new(44100).map_err(|err| MidiOutputError::Init(err.to_string()))?,
-    )));
-
-    Ok(dispatch_audition_events(
-        events,
-        clock,
-        audition_delay_ms,
-        cancel,
-        audition_enabled,
-        playback_tracks,
-        synth,
-    ))
 }
 
 #[cfg(test)]

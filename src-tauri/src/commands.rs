@@ -18,7 +18,7 @@ use crate::{
     keyboard::{KeyboardSink, TrackedKeyboardOutput},
     midi_file::parse_midi_bytes,
     midi_input::{list_midi_input_devices, MidiInputDevice},
-    midi_output::{dispatch_midi_events, list_midi_output_devices, MidiOutputDevice},
+    midi_output::{list_midi_output_devices, MidiOutputDevice},
     model::{
         InputSource, KeyAction, KeyActionKind, MidiEvent, MidiEventType, PlaybackOutputMode,
         PlaybackTrackState, Preset,
@@ -51,6 +51,7 @@ pub struct AppState {
     playback_tracks: Arc<Mutex<PlaybackTrackFilter>>,
     live_connection: Mutex<Option<midir::MidiInputConnection<()>>>,
     passthrough_hotkeys: Mutex<PassthroughHotkeyManager>,
+    audition_output: Mutex<Result<Arc<crate::audio_output::AuditionOutput>, String>>,
 }
 
 struct PlaybackRuntime {
@@ -85,6 +86,11 @@ impl AppState {
             playback_tracks: Arc::new(Mutex::new(BTreeMap::new())),
             live_connection: Mutex::new(None),
             passthrough_hotkeys: Mutex::new(PassthroughHotkeyManager::new()),
+            audition_output: Mutex::new(
+                crate::audio_output::AuditionOutput::new()
+                    .map(Arc::new)
+                    .map_err(|err| err.to_string()),
+            ),
         }
     }
 }
@@ -351,6 +357,19 @@ pub fn list_audio_outputs() -> Result<Vec<AudioOutputDevice>, String> {
 }
 
 #[tauri::command]
+pub fn set_audio_output_device(
+    device_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<AudioOutputDevice>, String> {
+    let output = state
+        .audition_output
+        .lock()
+        .map_err(|_| "audition output lock is poisoned".to_string())?;
+    let output = output.as_ref().map_err(|err| err.clone())?.clone();
+    output.set_device(device_id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub fn parse_midi_file(path: String) -> Result<Vec<MidiEvent>, String> {
     let bytes = fs::read(&path).map_err(|err| format!("failed to read MIDI file: {err}"))?;
     parse_midi_bytes(&bytes).map_err(|err| err.to_string())
@@ -475,20 +494,45 @@ fn start_event_playback(
     let clock = Arc::new(PlaybackClock::new(playback_speed(&preset)));
     let mut handles = Vec::new();
 
-    if let Some(handle) = dispatch_midi_events(
-        plan.midi_events,
-        clock.clone(),
-        plan.midi_delay_ms,
-        cancel.clone(),
-        release_on_cancel.clone(),
-        state.audition_enabled.clone(),
-        state.playback_tracks.clone(),
-    )
-    .or_else(|err| match output_mode {
-        PlaybackOutputMode::Keys => Ok(None),
-        PlaybackOutputMode::Audition | PlaybackOutputMode::Both => Err(err.to_string()),
-    })? {
-        handles.push(handle);
+    let audition_output = {
+        let guard = state
+            .audition_output
+            .lock()
+            .map_err(|_| "audition output lock is poisoned".to_string())?;
+        match output_mode {
+            PlaybackOutputMode::Keys => match guard.as_ref() {
+                Ok(output) => Some(output.clone()),
+                Err(_) => None,
+            },
+            PlaybackOutputMode::Audition | PlaybackOutputMode::Both => {
+                Some(guard.as_ref().map_err(|err| err.clone())?.clone())
+            }
+        }
+    };
+
+    if let Some(output) = audition_output {
+        if matches!(output_mode, PlaybackOutputMode::Audition | PlaybackOutputMode::Both)
+            && !output.has_stream()
+        {
+            let opened = output
+                .set_device(output.requested_id())
+                .map_err(|err| err.to_string())?;
+            if opened.is_none() {
+                return Err("no playback device found".to_string());
+            }
+        }
+
+        if let Some(handle) = crate::audition_engine::dispatch_audition_events(
+            plan.midi_events,
+            clock.clone(),
+            plan.midi_delay_ms,
+            cancel.clone(),
+            state.audition_enabled.clone(),
+            state.playback_tracks.clone(),
+            output.synth(),
+        ) {
+            handles.push(handle);
+        }
     }
 
     if let Some(handle) = dispatch_actions(
@@ -559,11 +603,24 @@ pub fn set_output_enabled(state: State<'_, AppState>, enabled: bool) -> Result<b
 
 #[tauri::command]
 pub fn set_audition_enabled(state: State<'_, AppState>, enabled: bool) -> Result<bool, String> {
-    let mut audition_enabled = state
-        .audition_enabled
-        .lock()
-        .map_err(|_| "audition state lock is poisoned".to_string())?;
-    *audition_enabled = enabled;
+    {
+        let mut audition_enabled = state
+            .audition_enabled
+            .lock()
+            .map_err(|_| "audition state lock is poisoned".to_string())?;
+        *audition_enabled = enabled;
+    }
+
+    if !enabled {
+        if let Ok(guard) = state.audition_output.lock() {
+            if let Ok(output) = guard.as_ref() {
+                if let Ok(mut synth) = output.synth().lock() {
+                    synth.all_notes_off();
+                }
+            }
+        }
+    }
+
     Ok(enabled)
 }
 

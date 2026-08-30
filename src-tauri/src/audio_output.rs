@@ -211,6 +211,10 @@ impl AuditionOutput {
         self.requested_id.lock().ok().and_then(|id| id.clone())
     }
 
+    pub fn has_stream(&self) -> bool {
+        self.stream.lock().ok().map(|s| s.is_some()).unwrap_or(false)
+    }
+
     pub fn set_device(
         &self,
         device_id: Option<String>,
