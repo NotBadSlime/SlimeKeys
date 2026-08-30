@@ -10,8 +10,6 @@ use thiserror::Error;
 use crate::audition_engine::{MidiSynth, RustySynth};
 
 const DEFAULT_SYNTH_SAMPLE_RATE: i32 = 44100;
-const RUSTYSYNTH_MIN_RATE: i32 = 16_000;
-const RUSTYSYNTH_MAX_RATE: i32 = 192_000;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,6 +175,15 @@ pub struct AudioStream {
     handle: Option<JoinHandle<()>>,
 }
 
+impl Drop for AudioStream {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 pub struct AuditionOutput {
     requested_id: Mutex<Option<String>>,
     synth: Arc<Mutex<Box<dyn MidiSynth>>>,
@@ -279,8 +286,13 @@ fn store_stream(
     if let Ok(mut sample_rate) = output.sample_rate.lock() {
         *sample_rate = rate;
     }
-    let mut guard = output.stream.lock().map_err(|_| lock_poisoned())?;
-    *guard = Some(stream);
+    let previous = {
+        let mut guard = output.stream.lock().map_err(|_| lock_poisoned())?;
+        let previous = guard.take();
+        *guard = Some(stream);
+        previous
+    };
+    drop(previous);
     Ok(())
 }
 
@@ -289,13 +301,11 @@ fn find_device(devices: &[AudioOutputDevice], id: &str) -> Option<AudioOutputDev
 }
 
 fn stop_stream(stream: &Mutex<Option<AudioStream>>) -> Result<(), AudioOutputError> {
-    let mut guard = stream.lock().map_err(|_| lock_poisoned())?;
-    if let Some(mut existing) = guard.take() {
-        existing.stop.store(true, Ordering::SeqCst);
-        if let Some(handle) = existing.handle.take() {
-            let _ = handle.join();
-        }
-    }
+    let existing = {
+        let mut guard = stream.lock().map_err(|_| lock_poisoned())?;
+        guard.take()
+    };
+    drop(existing);
     Ok(())
 }
 
@@ -426,29 +436,40 @@ fn open_and_run_wasapi(
         let channels = format.nChannels;
         let bits = format.wBitsPerSample;
         let samples_per_sec = format.nSamplesPerSec;
+        let block_align = format.nBlockAlign;
+        let avg_bytes_per_sec = format.nAvgBytesPerSec;
         let cb_size = format.cbSize;
-        let supported = match tag {
-            WAVE_FORMAT_IEEE_FLOAT => channels == 2 && bits == 32,
-            WAVE_FORMAT_EXTENSIBLE if cb_size >= 22 => {
-                let ext = std::ptr::read_unaligned(mix as *const WAVEFORMATEXTENSIBLE);
-                let ext_channels = ext.Format.nChannels;
-                let ext_bits = ext.Format.wBitsPerSample;
-                let sub_format = std::ptr::read_unaligned(std::ptr::addr_of!(ext.SubFormat));
-                ext_channels == 2 && ext_bits == 32 && sub_format == IEEE_FLOAT_SUBTYPE
-            }
-            _ => false,
-        };
+        let stereo_float_layout = channels == 2
+            && bits == 32
+            && block_align == 8
+            && avg_bytes_per_sec == samples_per_sec.saturating_mul(8);
+        let supported = stereo_float_layout
+            && match tag {
+                WAVE_FORMAT_IEEE_FLOAT => true,
+                WAVE_FORMAT_EXTENSIBLE if cb_size >= 22 => {
+                    let ext = std::ptr::read_unaligned(mix as *const WAVEFORMATEXTENSIBLE);
+                    let sub_format = std::ptr::read_unaligned(std::ptr::addr_of!(ext.SubFormat));
+                    sub_format == IEEE_FLOAT_SUBTYPE
+                }
+                _ => false,
+            };
         if !supported {
             CoTaskMemFree(Some(mix as *const core::ffi::c_void));
             return Err(AudioOutputError::Open(format!(
-                "unsupported mix format: tag={tag} channels={channels} bits={bits}"
+                "unsupported mix format: tag={tag} channels={channels} bits={bits} block_align={block_align} avg_bytes={avg_bytes_per_sec}"
             )));
         }
+
+        let Some(sample_rate) = i32::try_from(samples_per_sec).ok() else {
+            CoTaskMemFree(Some(mix as *const core::ffi::c_void));
+            return Err(AudioOutputError::Open(format!(
+                "unsupported mix sample rate: {samples_per_sec}"
+            )));
+        };
 
         let initialized = initialize_shared_client(&device, &probe, mix, BUFFER_HNS);
         CoTaskMemFree(Some(mix as *const core::ffi::c_void));
         let (wait_mode, client) = initialized?;
-        let sample_rate = (samples_per_sec as i32).clamp(RUSTYSYNTH_MIN_RATE, RUSTYSYNTH_MAX_RATE);
         (sample_rate, wait_mode, client)
     };
 
@@ -501,6 +522,8 @@ fn open_and_run_wasapi(
 
     let mut left = Vec::new();
     let mut right = Vec::new();
+    let mut consecutive_get_buffer_failures = 0u32;
+    const MAX_GET_BUFFER_FAILURES: u32 = 16;
 
     while !stop.load(Ordering::SeqCst) {
         match wait_mode {
@@ -526,24 +549,38 @@ fn open_and_run_wasapi(
             continue;
         }
 
-        left.resize(frames as usize, 0.0);
-        right.resize(frames as usize, 0.0);
-        left.fill(0.0);
-        right.fill(0.0);
-        if let Ok(mut synth) = synth.lock() {
-            synth.render(&mut left, &mut right);
+        match unsafe { render.GetBuffer(frames) } {
+            Err(_) => {
+                consecutive_get_buffer_failures =
+                    consecutive_get_buffer_failures.saturating_add(1);
+                if consecutive_get_buffer_failures >= MAX_GET_BUFFER_FAILURES {
+                    break;
+                }
+                continue;
+            }
+            Ok(data) if data.is_null() => {
+                let _ = unsafe { render.ReleaseBuffer(0, 0) };
+                break;
+            }
+            Ok(data) => {
+                consecutive_get_buffer_failures = 0;
+                left.resize(frames as usize, 0.0);
+                right.resize(frames as usize, 0.0);
+                left.fill(0.0);
+                right.fill(0.0);
+                if let Ok(mut synth) = synth.lock() {
+                    synth.render(&mut left, &mut right);
+                }
+                let samples = unsafe {
+                    std::slice::from_raw_parts_mut(data as *mut f32, frames as usize * 2)
+                };
+                for index in 0..frames as usize {
+                    samples[index * 2] = left[index];
+                    samples[index * 2 + 1] = right[index];
+                }
+                let _ = unsafe { render.ReleaseBuffer(frames, 0) };
+            }
         }
-
-        let data = match unsafe { render.GetBuffer(frames) } {
-            Ok(data) if !data.is_null() => data,
-            _ => continue,
-        };
-        let samples = unsafe { std::slice::from_raw_parts_mut(data as *mut f32, frames as usize * 2) };
-        for index in 0..frames as usize {
-            samples[index * 2] = left[index];
-            samples[index * 2 + 1] = right[index];
-        }
-        let _ = unsafe { render.ReleaseBuffer(frames, 0) };
     }
 
     if let Ok(mut synth) = synth.lock() {
