@@ -727,7 +727,7 @@ function App() {
     }
 
     await refreshMidiInputs(true);
-    await refreshAudioOutputs(true);
+    await refreshAudioOutputs(true, true);
   }
 
   async function refreshMidiInputs(silent = false) {
@@ -752,19 +752,21 @@ function App() {
     }
   }
 
-  async function refreshAudioOutputs(silent = false) {
+  async function refreshAudioOutputs(silent = false, applyDevice = false) {
     try {
       const devices = await invoke<AudioOutputDevice[]>("list_audio_outputs");
       setAudioOutputs(devices);
       const effective = effectiveAudioOutputId(storedAudioOutput, devices);
-      await invoke<AudioOutputDevice | null>("set_audio_output_device", {
-        deviceId: effective,
-      });
+      if (applyDevice) {
+        await invoke<AudioOutputDevice | null>("set_audio_output_device", {
+          deviceId: effective,
+        });
+      }
       if (!silent && devices.length === 0) {
         pushLog(t("noAudioOutputDeviceFound"));
       }
       if (
-        !silent &&
+        (applyDevice || !silent) &&
         storedAudioOutput.deviceId &&
         !storedAudioOutput.followSystemDefault &&
         effective === null &&
@@ -2425,37 +2427,36 @@ function App() {
                 </strong>
                 <span>{t("auditionOutputHint")}</span>
               </div>
-              <div className="audio-output-picker">
-                <label className="switch">
-                  <input
-                    checked={auditionEnabled}
-                    onChange={(event) => void handleAuditionToggle(event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>{t("auditionOutput")}</span>
-                </label>
-                <select
-                  aria-label={t("audioOutput")}
-                  disabled={audioOutputs.length === 0}
-                  onChange={(event) => void handleAudioOutputChange(event.target.value)}
-                  onFocus={() => void refreshAudioOutputs(true)}
-                  value={selectedAudioOutputValue(storedAudioOutput, audioOutputs)}
-                >
-                  {audioOutputs.length === 0 ? (
-                    <option value="">{t("noAudioOutputDeviceFound")}</option>
-                  ) : (
-                    <>
-                      <option value="">{t("systemDefaultAudioOutput")}</option>
-                      {audioOutputs.map((device) => (
-                        <option key={device.id} value={device.id}>
-                          {device.name}
-                          {device.isDefault ? ` (${t("systemDefaultAudioOutput")})` : ""}
-                        </option>
-                      ))}
-                    </>
-                  )}
-                </select>
-              </div>
+              <label className="switch">
+                <input
+                  checked={auditionEnabled}
+                  onChange={(event) => void handleAuditionToggle(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>{t("auditionOutput")}</span>
+              </label>
+              <select
+                aria-label={t("audioOutput")}
+                className="audio-output-select"
+                disabled={audioOutputs.length === 0}
+                onChange={(event) => void handleAudioOutputChange(event.target.value)}
+                onFocus={() => void refreshAudioOutputs(true)}
+                value={selectedAudioOutputValue(storedAudioOutput, audioOutputs)}
+              >
+                {audioOutputs.length === 0 ? (
+                  <option value="">{t("noAudioOutputDeviceFound")}</option>
+                ) : (
+                  <>
+                    <option value="">{t("systemDefaultAudioOutput")}</option>
+                    {audioOutputs.map((device) => (
+                      <option key={device.id} value={device.id}>
+                        {device.name}
+                        {device.isDefault ? ` (${t("systemDefaultAudioOutput")})` : ""}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
             </div>
 
             <button className="command danger release-command" onClick={handleReleaseAll} type="button">
