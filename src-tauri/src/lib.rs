@@ -12,10 +12,11 @@ pub mod rule_engine;
 
 use commands::{
     clear_passthrough_hotkeys, export_preset_file, get_app_snapshot, import_preset_file,
-    list_midi_files_near, list_midi_inputs, list_midi_outputs, panic_release_all_keys,
-    parse_midi_file, play_midi_events_from, play_midi_file, play_midi_file_from,
-    set_audition_enabled, set_output_enabled, set_passthrough_hotkeys, set_playback_speed,
-    set_playback_tracks, start_live_input, stop_live_input, stop_playback, AppState,
+    list_audio_outputs, list_midi_files_near, list_midi_inputs, list_midi_outputs,
+    panic_release_all_keys, parse_midi_file, play_midi_events_from, play_midi_file,
+    play_midi_file_from, set_audition_enabled, set_output_enabled, set_passthrough_hotkeys,
+    set_playback_speed, set_playback_tracks, start_live_input, stop_live_input, stop_playback,
+    AppState,
 };
 
 #[tauri::command]
@@ -33,6 +34,7 @@ pub fn run() {
             get_app_snapshot,
             list_midi_inputs,
             list_midi_outputs,
+            list_audio_outputs,
             list_midi_files_near,
             set_passthrough_hotkeys,
             clear_passthrough_hotkeys,
