@@ -3,6 +3,7 @@ pub mod keyboard;
 pub mod midi_file;
 pub mod midi_input;
 pub mod audio_output;
+pub mod audition_engine;
 pub mod midi_output;
 pub mod model;
 pub mod passthrough_hotkeys;
