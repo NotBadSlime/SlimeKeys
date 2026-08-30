@@ -1,7 +1,35 @@
 export type InputSource = "all" | "file" | "live";
-export type MidiEventType = "noteOn" | "noteOff" | "both";
+export type MidiEventType = "noteOn" | "noteOff" | "controlChange" | "both";
 export type TriggerMode = "tap" | "hold" | "retrigger" | "chop";
-export type HotkeyAction = "play" | "stop" | "next" | "previous" | "releaseAll";
+export type HotkeyAction =
+  | "play"
+  | "pause"
+  | "stop"
+  | "next"
+  | "previous"
+  | "nextPreset"
+  | "previousPreset"
+  | "toggleKeyOutput"
+  | "toggleAudition"
+  | "speedDown"
+  | "speedUp"
+  | "toggleTrack1"
+  | "toggleTrack2"
+  | "toggleTrack3"
+  | "toggleTrack4"
+  | "toggleTrack5"
+  | "toggleTrack6"
+  | "toggleTrack7"
+  | "toggleTrack8"
+  | "toggleTrack9"
+  | "releaseAll";
+export type PlaylistPlaybackMode =
+  | "sequential"
+  | "repeatOne"
+  | "repeatAll"
+  | "shuffle";
+export type PlaybackOutputMode = "keys" | "audition" | "both";
+export type WorkspaceTab = "rules" | "score";
 
 export interface HotkeyBinding {
   action: HotkeyAction;
@@ -25,6 +53,8 @@ export interface PlaybackSettings {
   transpose: number;
   octaveFold: OctaveFold;
   globalDelayMs: number;
+  keyOutputDelayMs: number;
+  auditionDelayMs: number;
 }
 
 export interface VelocityRange {
@@ -83,6 +113,77 @@ export interface MidiEvent {
   note: number;
   velocity: number;
   atMs: number;
+}
+
+export interface MidiNote {
+  id: string;
+  startMs: number;
+  endMs: number;
+  note: number;
+  track: number | null;
+  channel: number;
+  velocity: number;
+  selected: boolean;
+}
+
+export interface TrackSummary {
+  track: number | null;
+  key: string;
+  noteCount: number;
+  channels: number[];
+  minNote: number;
+  maxNote: number;
+  firstNoteMs: number;
+  visible: boolean;
+  muted: boolean;
+  solo: boolean;
+  playbackEnabled: boolean;
+}
+
+export interface PlaybackTrackState {
+  track: number | null;
+  enabled: boolean;
+}
+
+export interface ScoreEditorSnapshot {
+  notes: MidiNote[];
+  selectedNoteIds: string[];
+}
+
+export interface ScoreEditorState extends ScoreEditorSnapshot {
+  clipboard: MidiNote[];
+  undoStack: ScoreEditorSnapshot[];
+  redoStack: ScoreEditorSnapshot[];
+}
+
+export type ScoreEditAction =
+  | "selectAll"
+  | "undo"
+  | "redo"
+  | "delete"
+  | "copy"
+  | "cut"
+  | "paste"
+  | "clearSelection"
+  | "nudgeLeft"
+  | "nudgeRight"
+  | "transposeUp"
+  | "transposeDown";
+
+export interface MidiOutputDevice {
+  id: number;
+  name: string;
+}
+
+export interface AudioOutputDevice {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export interface StoredAudioOutput {
+  followSystemDefault: boolean;
+  deviceId: string | null;
 }
 
 export interface AppSnapshot {
